@@ -1,0 +1,81 @@
+{
+  "id": "contractsOpenApi",
+  "name": "Contracts: OpenAPI discovery",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "contracts/openapi.json",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "contracts-openapi-webhook",
+      "name": "Webhook контракта OpenAPI",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "db0b7ec5-2340-4d70-b9e2-61c1d36c9bd1",
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const contract = {\n  \"openapi\": \"3.1.0\",\n  \"info\": {\n    \"title\": \"n8n Integration Adapter API\",\n    \"version\": \"1.0.0\",\n    \"description\": \"Machine-readable contract for externally callable n8n webhooks in the local ServiceDesk integration adapter.\"\n  },\n  \"servers\": [\n    {\n      \"url\": \"http://127.0.0.1:5678\",\n      \"description\": \"Local n8n runtime\"\n    }\n  ],\n  \"tags\": [\n    {\n      \"name\": \"contracts\",\n      \"description\": \"Contract discovery endpoints\"\n    },\n    {\n      \"name\": \"email\",\n      \"description\": \"Email dispatch webhooks\"\n    },\n    {\n      \"name\": \"runbooks\",\n      \"description\": \"Operational runbook webhooks\"\n    }\n  ],\n  \"paths\": {\n    \"/webhook/contracts/openapi.json\": {\n      \"get\": {\n        \"operationId\": \"getN8nOpenApiContract\",\n        \"tags\": [\n          \"contracts\"\n        ],\n        \"summary\": \"Get the OpenAPI contract for n8n webhooks\",\n        \"description\": \"Returns the machine-readable contract that external applications use to discover execution endpoints and payload schemas.\",\n        \"responses\": {\n          \"200\": {\n            \"description\": \"OpenAPI contract\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/OpenApiDocument\"\n                }\n              }\n            }\n          }\n        }\n      }\n    },\n    \"/webhook/email/send\": {\n      \"post\": {\n        \"operationId\": \"sendEmail\",\n        \"tags\": [\n          \"email\"\n        ],\n        \"summary\": \"Send a text email through n8n\",\n        \"description\": \"Validates an email dispatch request and sends a text email through the SMTP credential bound in n8n.\",\n        \"security\": [\n          {\n            \"ServiceDeskWebhookToken\": []\n          }\n        ],\n        \"requestBody\": {\n          \"required\": true,\n          \"content\": {\n            \"application/json\": {\n              \"schema\": {\n                \"$ref\": \"#/components/schemas/SendEmailRequest\"\n              },\n              \"examples\": {\n                \"localGreenMail\": {\n                  \"summary\": \"Local GreenMail test\",\n                  \"value\": {\n                    \"to\": [\n                      \"automation-test@local.test\"\n                    ],\n                    \"cc\": [\n                      \"cc@local.test\"\n                    ],\n                    \"bcc\": [\n                      \"bcc@local.test\"\n                    ],\n                    \"replyTo\": \"sender@local.test\",\n                    \"subject\": \"n8n webhook send smoke\",\n                    \"body\": \"Webhook send smoke via GreenMail\"\n                  }\n                }\n              }\n            }\n          }\n        },\n        \"responses\": {\n          \"200\": {\n            \"description\": \"Email was accepted by the n8n Send Email node\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/SendEmailResponse\"\n                },\n                \"examples\": {\n                  \"sent\": {\n                    \"value\": {\n                      \"status\": \"sent\"\n                    }\n                  }\n                }\n              }\n            }\n          },\n          \"400\": {\n            \"description\": \"Request validation failed\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/ErrorResponse\"\n                },\n                \"examples\": {\n                  \"missingTo\": {\n                    \"value\": {\n                      \"error\": {\n                        \"code\": \"missing_to\",\n                        \"message\": \"Поле to обязательно.\"\n                      }\n                    }\n                  },\n                  \"attachmentsNotSupported\": {\n                    \"value\": {\n                      \"error\": {\n                        \"code\": \"attachments_not_supported\",\n                        \"message\": \"Attachments are not supported in v1.\"\n                      }\n                    }\n                  }\n                }\n              }\n            }\n          },\n          \"401\": {\n            \"description\": \"Missing or invalid webhook token\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/ErrorResponse\"\n                }\n              }\n            }\n          },\n          \"502\": {\n            \"description\": \"The n8n SMTP node failed to send the email\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/ErrorResponse\"\n                }\n              }\n            }\n          }\n        }\n      }\n    },\n    \"/webhook/servicedesk/runbook/start\": {\n      \"post\": {\n        \"operationId\": \"startRunbook\",\n        \"tags\": [\n          \"runbooks\"\n        ],\n        \"summary\": \"Start the stage 4 ServiceDesk runbook\",\n        \"description\": \"Accepts an approved ServiceDesk action request and returns a normalized acknowledgement.\",\n        \"security\": [\n          {\n            \"ServiceDeskWebhookToken\": []\n          }\n        ],\n        \"requestBody\": {\n          \"required\": true,\n          \"content\": {\n            \"application/json\": {\n              \"schema\": {\n                \"$ref\": \"#/components/schemas/StartRunbookRequest\"\n              },\n              \"examples\": {\n                \"stage4\": {\n                  \"value\": {\n                    \"invocation\": {\n                      \"invocation_id\": \"example-invocation\",\n                      \"action_id\": \"start_systemcenter_runbook\"\n                    },\n                    \"parameters\": {\n                      \"source\": \"servicedesk\"\n                    }\n                  }\n                }\n              }\n            }\n          }\n        },\n        \"responses\": {\n          \"200\": {\n            \"description\": \"Runbook request accepted by n8n\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/StartRunbookResponse\"\n                }\n              }\n            }\n          },\n          \"401\": {\n            \"description\": \"Missing or invalid webhook token\",\n            \"content\": {\n              \"application/json\": {\n                \"schema\": {\n                  \"$ref\": \"#/components/schemas/ErrorResponse\"\n                }\n              }\n            }\n          }\n        }\n      }\n    }\n  },\n  \"components\": {\n    \"securitySchemes\": {\n      \"ServiceDeskWebhookToken\": {\n        \"type\": \"apiKey\",\n        \"in\": \"header\",\n        \"name\": \"X-ServiceDesk-Token\",\n        \"description\": \"Webhook token configured as N8N_WEBHOOK_TOKEN in the n8n runtime.\"\n      }\n    },\n    \"schemas\": {\n      \"OpenApiDocument\": {\n        \"type\": \"object\",\n        \"description\": \"OpenAPI 3.1 document.\"\n      },\n      \"EmailAddressList\": {\n        \"oneOf\": [\n          {\n            \"type\": \"string\",\n            \"description\": \"Single address or comma/semicolon-separated addresses.\",\n            \"examples\": [\n              \"user@example.com\",\n              \"user@example.com; manager@example.com\"\n            ]\n          },\n          {\n            \"type\": \"array\",\n            \"items\": {\n              \"type\": \"string\",\n              \"format\": \"email\"\n            },\n            \"minItems\": 1\n          }\n        ]\n      },\n      \"SendEmailRequest\": {\n        \"type\": \"object\",\n        \"additionalProperties\": true,\n        \"required\": [\n          \"to\",\n          \"subject\",\n          \"body\"\n        ],\n        \"properties\": {\n          \"request_id\": {\n            \"type\": \"string\",\n            \"description\": \"Optional caller request identifier. The workflow also accepts requestId.\"\n          },\n          \"requestId\": {\n            \"type\": \"string\",\n            \"description\": \"Optional caller request identifier alias.\"\n          },\n          \"to\": {\n            \"$ref\": \"#/components/schemas/EmailAddressList\"\n          },\n          \"cc\": {\n            \"$ref\": \"#/components/schemas/EmailAddressList\"\n          },\n          \"bcc\": {\n            \"$ref\": \"#/components/schemas/EmailAddressList\"\n          },\n          \"replyTo\": {\n            \"type\": \"string\",\n            \"format\": \"email\"\n          },\n          \"reply_to\": {\n            \"type\": \"string\",\n            \"format\": \"email\",\n            \"description\": \"Alias accepted by the workflow for replyTo.\"\n          },\n          \"subject\": {\n            \"type\": \"string\",\n            \"minLength\": 1\n          },\n          \"body\": {\n            \"type\": \"string\",\n            \"minLength\": 1,\n            \"description\": \"Plain text email body.\"\n          }\n        },\n        \"not\": {\n          \"anyOf\": [\n            {\n              \"required\": [\n                \"attachment\"\n              ]\n            },\n            {\n              \"required\": [\n                \"attachments\"\n              ]\n            },\n            {\n              \"required\": [\n                \"files\"\n              ]\n            }\n          ]\n        }\n      },\n      \"SendEmailResponse\": {\n        \"type\": \"object\",\n        \"additionalProperties\": false,\n        \"required\": [\n          \"status\"\n        ],\n        \"properties\": {\n          \"status\": {\n            \"const\": \"sent\"\n          }\n        }\n      },\n      \"StartRunbookRequest\": {\n        \"type\": \"object\",\n        \"additionalProperties\": true,\n        \"properties\": {\n          \"invocation\": {\n            \"type\": \"object\",\n            \"additionalProperties\": true,\n            \"properties\": {\n              \"invocation_id\": {\n                \"type\": \"string\"\n              },\n              \"action_id\": {\n                \"type\": \"string\",\n                \"examples\": [\n                  \"start_systemcenter_runbook\"\n                ]\n              }\n            }\n          },\n          \"parameters\": {\n            \"type\": \"object\",\n            \"additionalProperties\": true\n          }\n        }\n      },\n      \"StartRunbookResponse\": {\n        \"type\": \"object\",\n        \"additionalProperties\": true,\n        \"required\": [\n          \"runbook_status\",\n          \"message\"\n        ],\n        \"properties\": {\n          \"runbook_status\": {\n            \"const\": \"accepted\"\n          },\n          \"message\": {\n            \"type\": \"string\"\n          },\n          \"invocation_id\": {\n            \"type\": [\n              \"string\",\n              \"null\"\n            ]\n          },\n          \"action_id\": {\n            \"type\": [\n              \"string\",\n              \"null\"\n            ]\n          },\n          \"parameters\": {\n            \"type\": \"object\",\n            \"additionalProperties\": true\n          }\n        }\n      },\n      \"ErrorResponse\": {\n        \"type\": \"object\",\n        \"additionalProperties\": true,\n        \"required\": [\n          \"error\"\n        ],\n        \"properties\": {\n          \"error\": {\n            \"type\": \"object\",\n            \"additionalProperties\": true,\n            \"required\": [\n              \"code\",\n              \"message\"\n            ],\n            \"properties\": {\n              \"code\": {\n                \"type\": \"string\"\n              },\n              \"message\": {\n                \"type\": \"string\"\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n};\nreturn [{ json: { statusCode: 200, response: contract } }];"
+      },
+      "id": "contracts-openapi-build-response",
+      "name": "Подготовка OpenAPI контракта",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}"
+        }
+      },
+      "id": "contracts-openapi-response",
+      "name": "Ответ OpenAPI контракта",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        800,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook контракта OpenAPI": {
+      "main": [
+        [
+          {
+            "node": "Подготовка OpenAPI контракта",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Подготовка OpenAPI контракта": {
+      "main": [
+        [
+          {
+            "node": "Ответ OpenAPI контракта",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

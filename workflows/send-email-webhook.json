@@ -1,0 +1,199 @@
+{
+  "id": "IZL94y092Lk9Yius",
+  "name": "Email: отправка письма через webhook",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "email/send",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "send-email-webhook",
+      "name": "Webhook отправки письма",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "b1a922e8-2f6a-4344-b8e2-59a2d1c6c83e",
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst headers = input.headers || {};\nconst body = input.body || {};\nconst expectedToken = (typeof $env !== 'undefined' && $env.N8N_WEBHOOK_TOKEN) || (typeof process !== 'undefined' && process.env.N8N_WEBHOOK_TOKEN) || '';\nconst actualToken = headers['x-servicedesk-token'] || headers['X-ServiceDesk-Token'] || headers['X-Servicedesk-Token'] || '';\nconst response = (statusCode, code, message, details = {}) => [{ json: { shouldSend: false, statusCode, response: { error: { code, message, ...details } } } }];\nif (!expectedToken || actualToken !== expectedToken) return response(401, 'unauthorized', 'Токен webhook отсутствует или некорректен.');\nif (body.attachment || body.attachments || body.files) return response(400, 'attachments_not_supported', 'Attachments are not supported in v1.');\nconst split = value => String(value).split(/[;,]/).map(v => v.trim()).filter(Boolean);\nconst list = value => Array.isArray(value) ? value.flatMap(split) : split(value || '');\nconst emailRe = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\nconst invalid = values => values.filter(v => !emailRe.test(v));\nconst to = list(body.to);\nconst cc = list(body.cc);\nconst bcc = list(body.bcc);\nconst replyTo = String(body.replyTo || body.reply_to || '').trim();\nconst subject = String(body.subject || '').trim();\nconst textBody = typeof body.body === 'string' ? body.body : '';\nif (to.length === 0) return response(400, 'missing_to', 'Поле to обязательно.');\nif (!subject) return response(400, 'missing_subject', 'Поле subject обязательно.');\nif (!textBody.trim()) return response(400, 'missing_body', 'Поле body обязательно.');\nconst bad = [...invalid(to), ...invalid(cc), ...invalid(bcc), ...(replyTo && !emailRe.test(replyTo) ? [replyTo] : [])];\nif (bad.length) return response(400, 'invalid_email', 'Некорректный email адрес.', { addresses: bad });\nconst requestId = String(body.request_id || body.requestId || `n8n-mail-${Date.now()}`).trim();\nreturn [{ json: { shouldSend: true, statusCode: 200, requestId, to, cc, bcc, toEmail: to.join(', '), ccEmail: cc.join(', '), bccEmail: bcc.join(', '), replyTo, subject, body: textBody } }];"
+      },
+      "id": "send-email-validate-request",
+      "name": "Подготовка письма",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.shouldSend }}",
+              "operation": "equal",
+              "value2": true
+            }
+          ]
+        },
+        "combineOperation": "all"
+      },
+      "id": "send-email-if-valid",
+      "name": "Запрос валиден?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        800,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "email",
+        "operation": "send",
+        "fromEmail": "={{ $env.N8N_MAIL_FROM || 'noreply@local.dev' }}",
+        "toEmail": "={{ $json.toEmail }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.body }}",
+        "options": {
+          "appendAttribution": false,
+          "ccEmail": "={{ $json.ccEmail }}",
+          "bccEmail": "={{ $json.bccEmail }}",
+          "replyTo": "={{ $json.replyTo }}"
+        }
+      },
+      "id": "send-email-node",
+      "name": "Отправка email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1080,
+        200
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $input.first().json || {};\nconst err = result.error || result.message?.error;\nif (err) {\n  const message = typeof err === 'string' ? err : (err.message || 'Email Send node failed.');\n  return [{ json: { statusCode: 502, response: { error: { code: 'email_send_failed', message } } } }];\n}\nreturn [{ json: { statusCode: 200, response: { status: 'sent' } } }];"
+      },
+      "id": "send-email-build-response",
+      "name": "Результат отправки",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}"
+        }
+      },
+      "id": "send-email-success-response",
+      "name": "Ответ отправки",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1600,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}"
+        }
+      },
+      "id": "send-email-error-response",
+      "name": "Ответ ошибки",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1080,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook отправки письма": {
+      "main": [
+        [
+          {
+            "node": "Подготовка письма",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Подготовка письма": {
+      "main": [
+        [
+          {
+            "node": "Запрос валиден?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Запрос валиден?": {
+      "main": [
+        [
+          {
+            "node": "Отправка email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ответ ошибки",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Отправка email": {
+      "main": [
+        [
+          {
+            "node": "Результат отправки",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Результат отправки": {
+      "main": [
+        [
+          {
+            "node": "Ответ отправки",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

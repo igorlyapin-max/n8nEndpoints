@@ -1,0 +1,418 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "n8n Integration Adapter API",
+    "version": "1.0.0",
+    "description": "Machine-readable contract for externally callable n8n webhooks in the local ServiceDesk integration adapter."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:5678",
+      "description": "Local n8n runtime"
+    }
+  ],
+  "tags": [
+    {
+      "name": "contracts",
+      "description": "Contract discovery endpoints"
+    },
+    {
+      "name": "email",
+      "description": "Email dispatch webhooks"
+    },
+    {
+      "name": "runbooks",
+      "description": "Operational runbook webhooks"
+    }
+  ],
+  "paths": {
+    "/webhook/contracts/openapi.json": {
+      "get": {
+        "operationId": "getN8nOpenApiContract",
+        "tags": [
+          "contracts"
+        ],
+        "summary": "Get the OpenAPI contract for n8n webhooks",
+        "description": "Returns the machine-readable contract that external applications use to discover execution endpoints and payload schemas.",
+        "responses": {
+          "200": {
+            "description": "OpenAPI contract",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpenApiDocument"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook/email/send": {
+      "post": {
+        "operationId": "sendEmail",
+        "tags": [
+          "email"
+        ],
+        "summary": "Send a text email through n8n",
+        "description": "Validates an email dispatch request and sends a text email through the SMTP credential bound in n8n.",
+        "security": [
+          {
+            "ServiceDeskWebhookToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendEmailRequest"
+              },
+              "examples": {
+                "localGreenMail": {
+                  "summary": "Local GreenMail test",
+                  "value": {
+                    "to": [
+                      "automation-test@local.test"
+                    ],
+                    "cc": [
+                      "cc@local.test"
+                    ],
+                    "bcc": [
+                      "bcc@local.test"
+                    ],
+                    "replyTo": "sender@local.test",
+                    "subject": "n8n webhook send smoke",
+                    "body": "Webhook send smoke via GreenMail"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Email was accepted by the n8n Send Email node",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendEmailResponse"
+                },
+                "examples": {
+                  "sent": {
+                    "value": {
+                      "status": "sent"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "missingTo": {
+                    "value": {
+                      "error": {
+                        "code": "missing_to",
+                        "message": "Поле to обязательно."
+                      }
+                    }
+                  },
+                  "attachmentsNotSupported": {
+                    "value": {
+                      "error": {
+                        "code": "attachments_not_supported",
+                        "message": "Attachments are not supported in v1."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid webhook token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The n8n SMTP node failed to send the email",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook/servicedesk/runbook/start": {
+      "post": {
+        "operationId": "startRunbook",
+        "tags": [
+          "runbooks"
+        ],
+        "summary": "Start the stage 4 ServiceDesk runbook",
+        "description": "Accepts an approved ServiceDesk action request and returns a normalized acknowledgement.",
+        "security": [
+          {
+            "ServiceDeskWebhookToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartRunbookRequest"
+              },
+              "examples": {
+                "stage4": {
+                  "value": {
+                    "invocation": {
+                      "invocation_id": "example-invocation",
+                      "action_id": "start_systemcenter_runbook"
+                    },
+                    "parameters": {
+                      "source": "servicedesk"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Runbook request accepted by n8n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartRunbookResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid webhook token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ServiceDeskWebhookToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-ServiceDesk-Token",
+        "description": "Webhook token configured as N8N_WEBHOOK_TOKEN in the n8n runtime."
+      }
+    },
+    "schemas": {
+      "OpenApiDocument": {
+        "type": "object",
+        "description": "OpenAPI 3.1 document."
+      },
+      "EmailAddressList": {
+        "oneOf": [
+          {
+            "type": "string",
+            "description": "Single address or comma/semicolon-separated addresses.",
+            "examples": [
+              "user@example.com",
+              "user@example.com; manager@example.com"
+            ]
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "email"
+            },
+            "minItems": 1
+          }
+        ]
+      },
+      "SendEmailRequest": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "to",
+          "subject",
+          "body"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "description": "Optional caller request identifier. The workflow also accepts requestId."
+          },
+          "requestId": {
+            "type": "string",
+            "description": "Optional caller request identifier alias."
+          },
+          "to": {
+            "$ref": "#/components/schemas/EmailAddressList"
+          },
+          "cc": {
+            "$ref": "#/components/schemas/EmailAddressList"
+          },
+          "bcc": {
+            "$ref": "#/components/schemas/EmailAddressList"
+          },
+          "replyTo": {
+            "type": "string",
+            "format": "email"
+          },
+          "reply_to": {
+            "type": "string",
+            "format": "email",
+            "description": "Alias accepted by the workflow for replyTo."
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Plain text email body."
+          }
+        },
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "attachment"
+              ]
+            },
+            {
+              "required": [
+                "attachments"
+              ]
+            },
+            {
+              "required": [
+                "files"
+              ]
+            }
+          ]
+        }
+      },
+      "SendEmailResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "const": "sent"
+          }
+        }
+      },
+      "StartRunbookRequest": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "invocation": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "invocation_id": {
+                "type": "string"
+              },
+              "action_id": {
+                "type": "string",
+                "examples": [
+                  "start_systemcenter_runbook"
+                ]
+              }
+            }
+          },
+          "parameters": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "StartRunbookResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "runbook_status",
+          "message"
+        ],
+        "properties": {
+          "runbook_status": {
+            "const": "accepted"
+          },
+          "message": {
+            "type": "string"
+          },
+          "invocation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "action_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "parameters": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "n8n API"
+  short_description: "Work with local n8n API and webhook workflows."
+  default_prompt: "Use the local n8n API and webhook workflow conventions for this project."

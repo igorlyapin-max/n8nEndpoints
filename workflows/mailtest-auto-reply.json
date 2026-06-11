@@ -1,0 +1,122 @@
+{
+  "name": "Mailtest: IMAP автоответ",
+  "nodes": [
+    {
+      "parameters": {
+        "mailbox": "INBOX",
+        "postProcessAction": "read",
+        "format": "simple",
+        "downloadAttachments": false,
+        "options": {
+          "customEmailConfig": "[\"UNSEEN\"]",
+          "trackLastMessageId": false
+        }
+      },
+      "id": "mailtest-imap-trigger",
+      "name": "Получение письма",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2.1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const email = $input.first().json || {};\nconst extractAddress = (value) => {\n  if (!value) return '';\n  if (typeof value === 'string') {\n    const match = value.match(/<([^>]+)>/);\n    return (match ? match[1] : value).trim();\n  }\n  if (Array.isArray(value.value) && value.value[0]?.address) return String(value.value[0].address).trim();\n  if (value.address) return String(value.address).trim();\n  return '';\n};\nconst from = extractAddress(email.from);\nconst subject = String(email.subject || '').trim();\nconst text = String(email.text || email.textPlain || email.html || '').trim();\nif (!from) {\n  return [{ json: { shouldReply: false, reason: 'missing_from', subject, text } }];\n}\nreturn [{ json: { shouldReply: true, toEmail: from, subject: subject ? `Re: ${subject}` : 'Re: test message', body: `Автоответ тестового стенда получен.\\n\\nOriginal subject: ${subject || '(empty)'}\\nOriginal body preview: ${text.slice(0, 500)}` } }];"
+      },
+      "id": "mailtest-build-reply",
+      "name": "Подготовка автоответа",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.shouldReply }}",
+              "operation": "equal",
+              "value2": true
+            }
+          ]
+        },
+        "combineOperation": "all"
+      },
+      "id": "mailtest-if-reply",
+      "name": "Нужен ответ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        800,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "email",
+        "operation": "send",
+        "fromEmail": "automation-test@local.test",
+        "toEmail": "={{ $json.toEmail }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.body }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "mailtest-send-reply",
+      "name": "Отправка автоответа",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1080,
+        220
+      ]
+    }
+  ],
+  "connections": {
+    "Получение письма": {
+      "main": [
+        [
+          {
+            "node": "Подготовка автоответа",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Подготовка автоответа": {
+      "main": [
+        [
+          {
+            "node": "Нужен ответ?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Нужен ответ?": {
+      "main": [
+        [
+          {
+            "node": "Отправка автоответа",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

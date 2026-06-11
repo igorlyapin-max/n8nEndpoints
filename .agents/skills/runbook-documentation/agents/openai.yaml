@@ -1,0 +1,4 @@
+interface:
+  display_name: "Runbook Documentation"
+  short_description: "Require usage and deployment instructions for every runbook."
+  default_prompt: "Apply the project runbook documentation rules: every runbook needs usage and deployment instructions."

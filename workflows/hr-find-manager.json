@@ -1,0 +1,175 @@
+{
+  "name": "HR: Поиск руководителя по ФИО и табельному номеру",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "hr/find-manager",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "hr-find-manager-webhook",
+      "name": "Webhook запроса",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst body = input.body || {};\n\nconst fullName = String(body.full_name || '').trim();\nconst employeeId = String(body.employee_id || '').trim();\n\nif (!fullName) {\n  return [{\n    json: {\n      statusCode: 400,\n      response: {\n        error: { code: 'missing_full_name', message: 'full_name (ФИО) обязателен.' }\n      }\n    }\n  }];\n}\n\nconst parts = fullName.split(/\\s+/);\nreturn [{\n  json: {\n    statusCode: 200,\n    full_name: fullName,\n    employee_id: employeeId,\n    last_name: parts[0] || '',\n    first_name: parts[1] || '',\n    middle_name: parts[2] || '',\n    hr_api_base_url: process.env.HR_API_BASE_URL || 'https://hr-api.example.com'\n  }\n}];"
+      },
+      "id": "hr-validate-input",
+      "name": "Валидация входных данных",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.hr_api_base_url }}/Positions.Hired",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "legalEntities": [],
+          "onlyFullDefined": true,
+          "withDuplicateEmployees": false
+        },
+        "options": {}
+      },
+      "id": "hr-positions-hired",
+      "name": "Загрузка сотрудников",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        800,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.hr_api_base_url }}/Orgstructure.Administrative",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "body": {
+          "legalEntities": []
+        },
+        "options": {}
+      },
+      "id": "hr-orgstructure-admin",
+      "name": "Загрузка оргструктуры",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        800,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst positionsData = input.positionsHired || [];\nconst orgData = input.orgStructure || [];\nconst lastName = String(input.last_name || '').toLowerCase();\nconst firstName = String(input.first_name || '').toLowerCase();\nconst middleName = String(input.middle_name || '').toLowerCase();\nconst employeeId = String(input.employee_id || '').trim();\n\nconst employees = [];\nfor (const le of positionsData) {\n  for (const pos of le.Positions || []) {\n    for (const emp of pos.Employees || []) {\n      const pi = emp.EmployeeInfo?.PersonInfo || {};\n      employees.push({\n        employeeGid: emp.EmployeeGID,\n        lastName: pi.Last_name || '',\n        firstName: pi.First_name || '',\n        middleName: pi.Middle_name || '',\n        fullName: [pi.Last_name, pi.First_name, pi.Middle_name].filter(Boolean).join(' '),\n        positionGid: pos.PositionGID,\n        positionName: pos.PositionName,\n        orgUnitGid: pos.OrgUnitGID,\n        orgUnitName: pos.OrgUnitName,\n        legalEntity: le.LegalEntity\n      });\n    }\n  }\n}\n\nlet candidates = employees.filter(e => {\n  const ln = String(e.lastName || '').toLowerCase() === lastName;\n  const fn = !firstName || String(e.firstName || '').toLowerCase() === firstName;\n  const mn = !middleName || String(e.middleName || '').toLowerCase() === middleName;\n  return ln && fn && mn;\n});\n\nconst managerMap = {};\nfor (const le of orgData) {\n  for (const ou of le.OrgUnits || []) {\n    if (ou.ManagerPositionGID) {\n      managerMap[ou.OrgUnitGID] = {\n        managerPositionGid: ou.ManagerPositionGID,\n        orgUnitName: ou.Name\n      };\n    }\n  }\n}\n\nconst results = [];\nfor (const cand of candidates) {\n  const orgInfo = managerMap[cand.orgUnitGid];\n  let manager = null;\n  let managerCandidates = [];\n  if (orgInfo) {\n    managerCandidates = employees.filter(e => e.positionGid === orgInfo.managerPositionGid);\n    if (managerCandidates.length === 1) {\n      manager = managerCandidates[0]; }\n  }\n  results.push({\n    employeeGid: cand.employeeGid,\n    fullName: cand.fullName,\n    positionName: cand.positionName,\n    orgUnitName: cand.orgUnitName,\n    legalEntity: cand.legalEntity,\n    managerFullName: manager ? manager.fullName : null,\n    managerPositionName: manager ? manager.positionName : null,\n    managerCandidates: managerCandidates.map(m => ({\n      employeeGid: m.employeeGid,\n      fullName: m.fullName,\n      positionName: m.positionName\n    })),\n    ambiguityWarning: managerCandidates.length > 1 ? 'Найдено несколько сотрудников на должности руководителя.' : null\n  });\n}\n\nreturn [{\n  json: {\n    statusCode: 200,\n    query: {\n      full_name: input.full_name,\n      employee_id: employeeId,\n      last_name: input.last_name,\n      first_name: input.first_name,\n      middle_name: input.middle_name\n    },\n    candidatesFound: candidates.length,\n    candidates: results,\n    note: employeeId ? 'Фильтрация по табельному номеру требует доработки: EmployeeID отсутствует в /Positions.Hired, доступен только через /Employee.Subordinates.Administrative после получения EmployeeGID.' : null\n  }\n}];"
+      },
+      "id": "hr-find-manager-logic",
+      "name": "Поиск руководителя",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1080,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseCode": "={{ $json.statusCode }}",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "hr-respond-result",
+      "name": "Нормализованный ответ",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1340,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook запроса": {
+      "main": [
+        [
+          {
+            "node": "Валидация входных данных",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Валидация входных данных": {
+      "main": [
+        [
+          {
+            "node": "Загрузка сотрудников",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Загрузка оргструктуры",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Загрузка сотрудников": {
+      "main": [
+        [
+          {
+            "node": "Поиск руководителя",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Загрузка оргструктуры": {
+      "main": [
+        [
+          {
+            "node": "Поиск руководителя",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Поиск руководителя": {
+      "main": [
+        [
+          {
+            "node": "Нормализованный ответ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

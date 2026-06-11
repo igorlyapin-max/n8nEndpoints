@@ -1,0 +1,81 @@
+{
+  "id": "A6GKOMxwTBH5Q4kg",
+  "name": "Webhook ранбука этапа 4",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "servicedesk/runbook/start",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "stage4-runbook-webhook",
+      "name": "Webhook ранбука",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "c3313646-414f-4942-a669-d7fd456ba09f",
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst headers = input.headers || {};\nconst body = input.body || {};\nconst envToken = typeof $env !== 'undefined' ? $env.N8N_WEBHOOK_TOKEN : undefined;\nconst processToken = typeof process !== 'undefined' ? process.env.N8N_WEBHOOK_TOKEN : undefined;\nconst expectedToken = envToken || processToken || '';\nconst actualToken = headers['x-servicedesk-token'] || headers['X-ServiceDesk-Token'] || headers['X-Servicedesk-Token'] || '';\n\nif (!expectedToken || actualToken !== expectedToken) {\n  return [\n    {\n      json: {\n        statusCode: 401,\n        response: {\n          error: {\n            code: 'unauthorized',\n            message: 'Токен webhook отсутствует или некорректен.'\n          }\n        }\n      }\n    }\n  ];\n}\n\nreturn [\n  {\n    json: {\n      statusCode: 200,\n      response: {\n        runbook_status: 'accepted',\n        message: 'n8n webhook ранбука этапа 4 получил авторизованный запрос.',\n        invocation_id: body.invocation?.invocation_id,\n        action_id: body.invocation?.action_id,\n        parameters: body.parameters || {}\n      }\n    }\n  }\n];"
+      },
+      "id": "stage4-runbook-token-check",
+      "name": "Проверка токена webhook",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}"
+        }
+      },
+      "id": "stage4-runbook-response",
+      "name": "Нормализованный ответ",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        800,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook ранбука": {
+      "main": [
+        [
+          {
+            "node": "Проверка токена webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Проверка токена webhook": {
+      "main": [
+        [
+          {
+            "node": "Нормализованный ответ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

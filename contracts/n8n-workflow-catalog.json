@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0",
+  "workflows": [
+    {
+      "workflow_id": "provider_channel_failure",
+      "display_name": "Сбой канала провайдера",
+      "business_scenario": "provider_channel_failure",
+      "endpoint_id": "n8n",
+      "callback_endpoint_id": "n8n",
+      "enabled": true,
+      "contract_url": "http://127.0.0.1:5678/webhook/contracts/openapi.json",
+      "execution_url": "http://127.0.0.1:5678/webhook/servicedesk/runbook/start",
+      "openapi_operation_id": "startRunbook",
+      "operations": [
+        "start_systemcenter_runbook"
+      ],
+      "management": {
+        "restart_supported": false,
+        "cancel_supported": false,
+        "execution_history_supported": false
+      }
+    },
+    {
+      "workflow_id": "zabbix_problem_processing",
+      "display_name": "Обработка проблемы Zabbix",
+      "business_scenario": "zabbix_problem_processing",
+      "endpoint_id": "n8n",
+      "callback_endpoint_id": "n8n",
+      "enabled": true,
+      "operations": [
+        "check_zabbix_status"
+      ],
+      "management": {
+        "restart_supported": false,
+        "cancel_supported": false,
+        "execution_history_supported": false
+      }
+    },
+    {
+      "workflow_id": "email_dispatch",
+      "display_name": "Отправка email через n8n",
+      "business_scenario": "email_dispatch",
+      "endpoint_id": "n8n",
+      "callback_endpoint_id": "n8n",
+      "enabled": true,
+      "contract_url": "http://127.0.0.1:5678/webhook/contracts/openapi.json",
+      "execution_url": "http://127.0.0.1:5678/webhook/email/send",
+      "openapi_operation_id": "sendEmail",
+      "operations": [
+        "send_email"
+      ],
+      "management": {
+        "restart_supported": false,
+        "cancel_supported": false,
+        "execution_history_supported": false
+      }
+    },
+    {
+      "workflow_id": "contract_discovery",
+      "display_name": "Публикация OpenAPI контракта n8n",
+      "business_scenario": "contract_discovery",
+      "endpoint_id": "n8n",
+      "callback_endpoint_id": "n8n",
+      "enabled": true,
+      "contract_url": "http://127.0.0.1:5678/webhook/contracts/openapi.json",
+      "execution_url": "http://127.0.0.1:5678/webhook/contracts/openapi.json",
+      "openapi_operation_id": "getN8nOpenApiContract",
+      "operations": [
+        "discover_contract"
+      ],
+      "management": {
+        "restart_supported": false,
+        "cancel_supported": false,
+        "execution_history_supported": false
+      }
+    },
+    {
+      "workflow_id": "mailtest_auto_reply",
+      "display_name": "Локальный тест получения писем и автоответов",
+      "business_scenario": "mailtest_auto_reply",
+      "endpoint_id": "n8n",
+      "callback_endpoint_id": "n8n",
+      "enabled": true,
+      "test_only": true,
+      "operations": [
+        "receive_email",
+        "send_auto_reply"
+      ],
+      "management": {
+        "restart_supported": false,
+        "cancel_supported": false,
+        "execution_history_supported": false
+      }
+    }
+  ]
+}
