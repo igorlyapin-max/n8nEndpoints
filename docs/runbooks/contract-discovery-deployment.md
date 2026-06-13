@@ -3,16 +3,37 @@
 ## Import And Activation
 
 1. Update `contracts/n8n-openapi.json` when public webhook parameters, paths, auth, request schemas, or response schemas change.
+   For runbooks, this includes changes to `invocation.extensions.async_callback`, result transport semantics, and response correlation fields.
 2. Regenerate the n8n workflow export:
 
 ```bash
 node scripts/build-contract-workflow.mjs
 ```
 
+If the email template catalog changed, regenerate template workflows too:
+
+```bash
+node scripts/build-email-template-workflows.mjs
+```
+
+If the Zabbix problem update workflow changed, regenerate it too:
+
+```bash
+node scripts/build-zabbix-problem-workflow.mjs
+```
+
+If the stage4 runbook async delivery changed, regenerate it too:
+
+```bash
+node scripts/build-stage4-runbook-workflow.mjs
+```
+
 3. Import `workflows/contracts-openapi-webhook.json` into n8n.
 4. Confirm the workflow name is `Contracts: OpenAPI discovery`.
 5. Activate or publish the workflow.
-6. Restart n8n if the CLI reports that webhook registration changes require restart.
+6. Update `contracts/n8n-workflow-catalog.json` when endpoint, operation, result delivery, or discoverability metadata changes.
+7. Update usage/deployment runbook docs for the changed endpoint.
+8. Restart n8n if the CLI reports that webhook registration changes require restart.
 
 Production contract path:
 
@@ -32,8 +53,15 @@ Static checks:
 
 ```bash
 node --check scripts/build-contract-workflow.mjs
+node --check scripts/build-stage4-runbook-workflow.mjs
+node --check scripts/build-email-template-workflows.mjs
+node --check scripts/build-zabbix-problem-workflow.mjs
 node scripts/build-contract-workflow.mjs --check
-jq empty contracts/n8n-openapi.json workflows/contracts-openapi-webhook.json contracts/n8n-workflow-catalog.json
+node scripts/build-stage4-runbook-workflow.mjs --check
+node scripts/build-email-template-workflows.mjs --check
+node scripts/build-zabbix-problem-workflow.mjs --check
+node scripts/test-contracts.mjs
+jq empty contracts/n8n-openapi.json workflows/contracts-openapi-webhook.json contracts/n8n-workflow-catalog.json contracts/email-template-catalog.json contracts/email-template-catalog.schema.json workflows/stage4-runbook-webhook.json workflows/send-templated-email-webhook.json workflows/update-zabbix-problem-webhook.json
 ```
 
 Runtime checks:

@@ -4,6 +4,8 @@
 
 Workflow `Email: отправка письма через webhook` принимает HTTP-запрос от приложения и отправляет текстовое письмо через n8n `Send Email` node.
 
+Для писем по бизнес-шаблонам используйте отдельный workflow `Email: отправка письма по шаблону` и endpoint `POST /webhook/email/send-template`. Этот direct-send workflow остается для случаев, когда caller уже сформировал `subject` и `body`.
+
 Production webhook:
 
 ```text

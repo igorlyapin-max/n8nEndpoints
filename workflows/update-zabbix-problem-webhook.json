@@ -1,0 +1,81 @@
+{
+  "id": "updateZabbixProblem",
+  "name": "Zabbix: обновление problem по URL",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "zabbix/problem/update",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "update-zabbix-problem-webhook",
+      "name": "Webhook обновления Zabbix problem",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "227cbfaa-e4b0-48f6-b3c9-dfcd4bff6ab5",
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst headers = input.headers || {};\nconst body = input.body || {};\nconst expectedToken = (typeof $env !== 'undefined' && $env.N8N_WEBHOOK_TOKEN) || (typeof process !== 'undefined' && process.env.N8N_WEBHOOK_TOKEN) || '';\nconst actualToken = headers['x-servicedesk-token'] || headers['X-ServiceDesk-Token'] || headers['X-Servicedesk-Token'] || '';\nconst debugLevel = String((typeof $env !== 'undefined' && $env.N8N_WORKFLOW_DEBUG) || (typeof process !== 'undefined' && process.env.N8N_WORKFLOW_DEBUG) || 'off');\n\nconst diagnostic = (level, event, fields = {}) => {\n  const order = { off: 0, Basic: 1, Verbose: 2 };\n  if ((order[debugLevel] || 0) < (order[level] || 0)) return;\n  const safeFields = {};\n  for (const [key, value] of Object.entries(fields)) {\n    if (/token|password|secret|message/i.test(key)) continue;\n    safeFields[key] = value;\n  }\n  console.log(JSON.stringify({ ts: new Date().toISOString(), level, event, ...safeFields }));\n};\n\nconst response = (statusCode, code, message, details = {}) => [{\n  json: {\n    statusCode,\n    response: {\n      error: { code, message, ...details }\n    }\n  }\n}];\n\nconst errorResponse = (statusCode, code, message, details = {}) => {\n  diagnostic('Basic', 'update_zabbix_problem_rejected', { statusCode, code, zabbix_origin: details.zabbix_origin });\n  return response(statusCode, code, message, details);\n};\n\nif (!expectedToken || actualToken !== expectedToken) {\n  return errorResponse(401, 'unauthorized', 'Токен webhook отсутствует или некорректен.');\n}\n\nconst problemUrlRaw = String(body.problemUrl || body.problem_url || '').trim();\nconst messageRaw = String(body.message || '').trim();\nif (!problemUrlRaw) return errorResponse(400, 'missing_problem_url', 'Поле problemUrl обязательно.');\nif (!messageRaw) return errorResponse(400, 'missing_message', 'Поле message обязательно.');\nif (messageRaw.length > 2000) return errorResponse(400, 'message_too_long', 'Поле message не должно превышать 2000 символов.');\n\nconst decodeQuery = (value) => {\n  try {\n    return decodeURIComponent(String(value || '').replace(/\\+/g, ' '));\n  } catch {\n    return String(value || '');\n  }\n};\n\nconst parseProblemUrl = (value) => {\n  const raw = String(value || '').trim();\n  const match = raw.match(/^(https?):\\/\\/([^/?#]+)(?:\\/[^?#]*)?(?:\\?([^#]*))?(?:#.*)?$/i);\n  if (!match) return null;\n  const scheme = match[1].toLowerCase();\n  const authority = match[2];\n  if (!authority || authority.includes('@')) return null;\n  const params = {};\n  for (const part of String(match[3] || '').split('&')) {\n    if (!part) continue;\n    const separator = part.indexOf('=');\n    const key = decodeQuery(separator >= 0 ? part.slice(0, separator) : part);\n    const paramValue = decodeQuery(separator >= 0 ? part.slice(separator + 1) : '');\n    if (key && params[key] === undefined) params[key] = paramValue;\n  }\n  return {\n    origin: scheme + '://' + authority,\n    queryParam: (name) => params[name] || ''\n  };\n};\n\nconst problemUrl = parseProblemUrl(problemUrlRaw);\nif (!problemUrl) {\n  return errorResponse(400, 'invalid_problem_url', 'Поле problemUrl должно быть корректным URL.');\n}\n\nconst eventid = String(problemUrl.queryParam('eventid') || '').trim();\nconst triggerid = String(problemUrl.queryParam('triggerid') || '').trim();\nif (!eventid) return errorResponse(400, 'missing_eventid', 'problemUrl должен содержать query parameter eventid.');\nif (!triggerid) return errorResponse(400, 'missing_triggerid', 'problemUrl должен содержать query parameter triggerid.');\nif (!/^[0-9]+$/.test(eventid)) return errorResponse(400, 'invalid_eventid', 'eventid должен быть числовой строкой.', { eventid });\nif (!/^[0-9]+$/.test(triggerid)) return errorResponse(400, 'invalid_triggerid', 'triggerid должен быть числовой строкой.', { triggerid });\n\nconst zabbixOrigin = problemUrl.origin;\n\nconst parseRegistry = (name) => {\n  const raw = (typeof $env !== 'undefined' && $env[name]) || (typeof process !== 'undefined' && process.env[name]) || '';\n  if (!raw) return {};\n  try {\n    const parsed = JSON.parse(raw);\n    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};\n  } catch {\n    throw new Error(name + ' must be a JSON object.');\n  }\n};\n\nlet tokenRegistry;\nlet apiUrlRegistry;\ntry {\n  tokenRegistry = parseRegistry('ZABBIX_API_TOKENS_BY_ORIGIN');\n  apiUrlRegistry = parseRegistry('ZABBIX_API_URLS_BY_ORIGIN');\n} catch (error) {\n  return errorResponse(400, 'invalid_zabbix_registry', 'Zabbix registry environment variables must be valid JSON objects.');\n}\n\nconst zabbixToken = String(tokenRegistry[zabbixOrigin] || '').trim();\nif (!zabbixToken) {\n  return errorResponse(400, 'unknown_zabbix_origin', 'Для zabbix_origin не найден API token в ZABBIX_API_TOKENS_BY_ORIGIN.', { zabbix_origin: zabbixOrigin });\n}\n\nconst zabbixApiUrl = String(apiUrlRegistry[zabbixOrigin] || (zabbixOrigin + '/api_jsonrpc.php')).trim();\n\nconst formattedMessage = messageRaw + '\\n';\nconst httpRequest = this?.helpers?.httpRequest?.bind(this.helpers);\n\nasync function zabbixRpc(method, params) {\n  if (!httpRequest) {\n    throw new Error('n8n httpRequest helper is not available in Code node.');\n  }\n\n  let payload;\n  try {\n    payload = await httpRequest({\n      method: 'POST',\n      url: zabbixApiUrl,\n      headers: {\n        'Content-Type': 'application/json-rpc',\n        Accept: 'application/json',\n        Authorization: 'Bearer ' + zabbixToken\n      },\n      body: {\n        jsonrpc: '2.0',\n        method,\n        params,\n        id: 1\n      },\n      json: true\n    });\n  } catch (error) {\n    throw new Error('zabbix_api_http_request_failed');\n  }\n  if (payload.error) {\n    throw new Error('zabbix_api_rpc_error');\n  }\n  return payload.result;\n}\n\nlet problems;\ntry {\n  problems = await zabbixRpc('problem.get', {\n    output: ['eventid', 'objectid', 'name', 'acknowledged', 'severity'],\n    eventids: [eventid],\n    recent: true,\n    selectAcknowledges: 'extend'\n  });\n} catch (error) {\n  return errorResponse(502, 'zabbix_problem_get_failed', 'Zabbix problem.get failed.', { zabbix_origin: zabbixOrigin });\n}\n\nif (!Array.isArray(problems) || problems.length === 0) {\n  return errorResponse(404, 'zabbix_problem_not_found', 'Zabbix problem не найден по eventid.', { eventid, triggerid, zabbix_origin: zabbixOrigin });\n}\n\nconst problem = problems.find((candidate) => String(candidate.eventid) === eventid) || problems[0];\nif (String(problem.objectid) !== triggerid) {\n  return errorResponse(409, 'trigger_mismatch', 'eventid найден, но objectid problem не совпадает с triggerid из URL.', {\n    eventid,\n    triggerid,\n    zabbix_objectid: String(problem.objectid || ''),\n    zabbix_origin: zabbixOrigin\n  });\n}\n\ntry {\n  await zabbixRpc('event.acknowledge', {\n    eventids: [eventid],\n    action: 4,\n    message: formattedMessage\n  });\n} catch (error) {\n  return errorResponse(502, 'zabbix_event_acknowledge_failed', 'Zabbix event.acknowledge failed.', { eventid, triggerid, zabbix_origin: zabbixOrigin });\n}\n\ndiagnostic('Basic', 'update_zabbix_problem_updated', { eventid, triggerid, zabbix_origin: zabbixOrigin });\n\nreturn [{\n  json: {\n    statusCode: 200,\n    response: {\n      status: 'updated',\n      eventid,\n      triggerid,\n      zabbix_origin: zabbixOrigin,\n      message: formattedMessage,\n      problem: {\n        name: problem.name,\n        severity: problem.severity,\n        acknowledged: problem.acknowledged\n      }\n    }\n  }\n}];"
+      },
+      "id": "update-zabbix-problem-run",
+      "name": "Обновление Zabbix problem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}"
+        }
+      },
+      "id": "update-zabbix-problem-response",
+      "name": "Нормализованный ответ",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        800,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook обновления Zabbix problem": {
+      "main": [
+        [
+          {
+            "node": "Обновление Zabbix problem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Обновление Zabbix problem": {
+      "main": [
+        [
+          {
+            "node": "Нормализованный ответ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

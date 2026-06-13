@@ -1,0 +1,136 @@
+{
+  "schema_version": "1.0",
+  "templates": [
+    {
+      "template_id": "provider_line_repair_request",
+      "display_name": "Запрос провайдеру на ремонт линии",
+      "description": "Первичное обращение к провайдеру для регистрации ремонта линии связи.",
+      "subject_template": "Заявка {{localTicketNumber}}: ремонт линии {{lineId}}",
+      "body_template": "Добрый день.\n\nПросим зарегистрировать обращение на ремонт линии связи.\n\nНаш номер заявки: {{localTicketNumber}}\nЛиния: {{lineId}}\nАдрес: {{serviceAddress}}\nОписание проблемы: {{problemDescription}}\nВлияние: {{impact}}\n\nКонтакт: {{contactName}}, {{contactPhone}}\nПредпочтительное время связи: {{preferredContactHours}}\n\nПросим в ответном письме указать номер обращения провайдера и оставить наш номер заявки {{localTicketNumber}} в теле письма.",
+      "required_params": [
+        "localTicketNumber",
+        "lineId",
+        "serviceAddress",
+        "problemDescription",
+        "contactName",
+        "contactPhone"
+      ],
+      "optional_params": [
+        "impact",
+        "preferredContactHours"
+      ],
+      "params": [
+        {
+          "name": "localTicketNumber",
+          "type": "string",
+          "required": true,
+          "description": "Внутренний номер заявки ServiceDesk для корреляции ответов провайдера.",
+          "pattern": "^ГКМ[0-9]{8}$",
+          "example": "ГКМ12345678"
+        },
+        {
+          "name": "lineId",
+          "type": "string",
+          "required": true,
+          "description": "Идентификатор линии или канала у заказчика.",
+          "example": "L-100500"
+        },
+        {
+          "name": "serviceAddress",
+          "type": "string",
+          "required": true,
+          "description": "Адрес услуги или площадки, где требуется ремонт.",
+          "example": "Москва, ул. Тестовая, д. 1"
+        },
+        {
+          "name": "problemDescription",
+          "type": "string",
+          "required": true,
+          "description": "Краткое описание неисправности.",
+          "example": "Нет связи на линии с 10:15 МСК"
+        },
+        {
+          "name": "contactName",
+          "type": "string",
+          "required": true,
+          "description": "Контактное лицо для уточнений.",
+          "example": "Иван Иванов"
+        },
+        {
+          "name": "contactPhone",
+          "type": "string",
+          "required": true,
+          "description": "Телефон контактного лица.",
+          "example": "+7 999 000-00-00"
+        },
+        {
+          "name": "impact",
+          "type": "string",
+          "required": false,
+          "description": "Влияние инцидента на сервис.",
+          "example": "Полная недоступность сервиса"
+        },
+        {
+          "name": "preferredContactHours",
+          "type": "string",
+          "required": false,
+          "description": "Предпочтительное время связи.",
+          "example": "09:00-18:00 МСК"
+        }
+      ]
+    },
+    {
+      "template_id": "provider_channel_outage_test",
+      "display_name": "Тестовый шаблон: пропадание канала",
+      "description": "Тестовое обращение к провайдеру по пропаданию связи на объекте.",
+      "subject_template": "Пропадание связи по каналу {{city}}",
+      "body_template": "Добрый день.\nФиксируем пропадание канала на объекте по адресу {{location}}\nIP адрес {{ip_address}}\n№ {{contract}}\nПросьба выяснить причину и устранить аварию.\n\nЗапись в системе учета заявок ГКМ Наряд № {{service_request}}\n\n!! Просьба, при ответе на письмо, цитировать всю переписку, использовать кнопку \"Ответить всем\";\nПри необходимости для оперативного решения вопросов или получения уточнений звонить:\n+7-495- 11111111 (в рабочее время)\n+7-495- 22222222 (круглосуточно)\n\n",
+      "required_params": [
+        "city",
+        "location",
+        "ip_address",
+        "contract",
+        "service_request"
+      ],
+      "optional_params": [],
+      "params": [
+        {
+          "name": "city",
+          "type": "string",
+          "required": true,
+          "description": "Город или регион канала, подставляется в тему письма.",
+          "example": "Москва"
+        },
+        {
+          "name": "location",
+          "type": "string",
+          "required": true,
+          "description": "Адрес объекта, где зафиксировано пропадание канала.",
+          "example": "Москва, ул. Тестовая, д. 1"
+        },
+        {
+          "name": "ip_address",
+          "type": "string",
+          "required": true,
+          "description": "IP адрес канала или оборудования.",
+          "pattern": "^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$",
+          "example": "192.0.2.10"
+        },
+        {
+          "name": "contract",
+          "type": "string",
+          "required": true,
+          "description": "Номер договора, контракта или канала у провайдера.",
+          "example": "CNT-100500"
+        },
+        {
+          "name": "service_request",
+          "type": "string",
+          "required": true,
+          "description": "Номер наряда или заявки в системе учета ГКМ без текстового префикса.",
+          "example": "12345678"
+        }
+      ]
+    }
+  ]
+}

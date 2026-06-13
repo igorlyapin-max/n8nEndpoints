@@ -7,6 +7,7 @@
 - Для node `Отправка email` создан SMTP credential.
 - Для локального теста поднят GreenMail из `docker-compose.mailtest.yml`.
 - Workflow `Contracts: OpenAPI discovery` импортирован и активирован, чтобы внешние приложения могли получить контракт по `GET /webhook/contracts/openapi.json`.
+- Для отправки по шаблонам отдельно импортируются `workflows/email-template-catalog-webhook.json` и `workflows/send-templated-email-webhook.json`; direct-send workflow не хранит template catalog.
 
 ## Импорт
 

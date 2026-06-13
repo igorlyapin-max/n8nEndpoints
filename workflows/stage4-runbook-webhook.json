@@ -21,15 +21,81 @@
     },
     {
       "parameters": {
-        "jsCode": "const input = $input.first().json;\nconst headers = input.headers || {};\nconst body = input.body || {};\nconst envToken = typeof $env !== 'undefined' ? $env.N8N_WEBHOOK_TOKEN : undefined;\nconst processToken = typeof process !== 'undefined' ? process.env.N8N_WEBHOOK_TOKEN : undefined;\nconst expectedToken = envToken || processToken || '';\nconst actualToken = headers['x-servicedesk-token'] || headers['X-ServiceDesk-Token'] || headers['X-Servicedesk-Token'] || '';\n\nif (!expectedToken || actualToken !== expectedToken) {\n  return [\n    {\n      json: {\n        statusCode: 401,\n        response: {\n          error: {\n            code: 'unauthorized',\n            message: 'Токен webhook отсутствует или некорректен.'\n          }\n        }\n      }\n    }\n  ];\n}\n\nreturn [\n  {\n    json: {\n      statusCode: 200,\n      response: {\n        runbook_status: 'accepted',\n        message: 'n8n webhook ранбука этапа 4 получил авторизованный запрос.',\n        invocation_id: body.invocation?.invocation_id,\n        action_id: body.invocation?.action_id,\n        parameters: body.parameters || {}\n      }\n    }\n  }\n];"
+        "jsCode": "const input = $input.first().json;\nconst headers = input.headers || {};\nconst body = input.body && typeof input.body === \"object\" ? input.body : {};\nconst env = typeof $env !== \"undefined\" ? $env : {};\nconst expectedToken = env.N8N_WEBHOOK_TOKEN || (typeof process !== \"undefined\" ? process.env.N8N_WEBHOOK_TOKEN : \"\") || \"\";\nconst actualToken = headers[\"x-servicedesk-token\"] || headers[\"X-ServiceDesk-Token\"] || headers[\"X-Servicedesk-Token\"] || \"\";\nconst debugLevel = String(env.N8N_WORKFLOW_DEBUG || (typeof process !== \"undefined\" ? process.env.N8N_WORKFLOW_DEBUG : \"\") || \"off\");\n\nfunction diagnostic(level, event, fields = {}) {\n  const order = { off: 0, Basic: 1, Verbose: 2 };\n  if ((order[debugLevel] || 0) < (order[level] || 0)) return;\n  const safeFields = {};\n  for (const [key, value] of Object.entries(fields)) {\n    if (/token|password|secret|callback_url/i.test(key)) continue;\n    safeFields[key] = value;\n  }\n  console.log(JSON.stringify({ ts: new Date().toISOString(), level, event, ...safeFields }));\n}\n\nfunction error(statusCode, code, message, details = {}) {\n  diagnostic(\"Basic\", \"stage4_request_rejected\", { statusCode, code });\n  return [\n    {\n      json: {\n        shouldPublishKafka: false,\n        statusCode,\n        response: {\n          error: {\n            code,\n            message,\n            ...details\n          }\n        }\n      }\n    }\n  ];\n}\n\nfunction isObject(value) {\n  return value !== null && typeof value === \"object\" && !Array.isArray(value);\n}\n\nfunction stringValue(value) {\n  return typeof value === \"string\" ? value.trim() : \"\";\n}\n\nfunction callbackTokenFor(source) {\n  const normalized = String(source || \"\").replace(/[^A-Za-z0-9]+/g, \"_\").replace(/^_+|_+$/g, \"\").toUpperCase();\n  const sourceToken = normalized ? env[\"INTEGRATION_CALLBACK_TOKEN__\" + normalized] : \"\";\n  const fallback = env.INTEGRATION_CALLBACK_TOKEN || (typeof process !== \"undefined\" ? process.env.INTEGRATION_CALLBACK_TOKEN : \"\") || \"\";\n  return sourceToken || fallback;\n}\n\nfunction buildExternalEvent(asyncCallback, invocation, parameters, acceptedAt) {\n  const eventSuffix = \"stage4_success\";\n  const eventIdBase = String(asyncCallback.idempotency_key_base + \":\" + eventSuffix).replace(/[^A-Za-z0-9_.:-]/g, \"-\").slice(0, 200);\n  const event = {\n    schema_version: \"1.0\",\n    event_id: eventIdBase,\n    case_id: asyncCallback.case_id,\n    wait_id: asyncCallback.wait_id,\n    correlation_id: asyncCallback.correlation_id,\n    source: asyncCallback.source,\n    event_type: asyncCallback.event_type,\n    status: \"success\",\n    received_at: acceptedAt,\n    idempotency_key: asyncCallback.idempotency_key_base + \":\" + eventSuffix,\n    result: {\n      action_id: invocation.action_id,\n      invocation_id: invocation.invocation_id || null,\n      runbook_status: \"completed\",\n      message: \"n8n stage4 runbook completed successfully.\",\n      parameters\n    },\n    metadata: {\n      workflow_id: \"provider_channel_failure\",\n      transport_requested: asyncCallback.result_transport\n    }\n  };\n  if (asyncCallback.ticket_id) event.ticket_id = asyncCallback.ticket_id;\n  return event;\n}\n\nif (!expectedToken || actualToken !== expectedToken) {\n  return error(401, \"unauthorized\", \"Токен webhook отсутствует или некорректен.\");\n}\n\nconst invocation = isObject(body.invocation) ? body.invocation : {};\nconst actionId = stringValue(invocation.action_id);\n\nif (!actionId) {\n  return error(400, \"missing_action_id\", \"Поле invocation.action_id обязательно.\");\n}\n\nconst parameters = isObject(body.parameters) ? body.parameters : {};\nconst extensions = isObject(invocation.extensions) ? invocation.extensions : {};\nconst asyncCallback = isObject(extensions.async_callback) ? extensions.async_callback : undefined;\nconst acceptedAt = new Date().toISOString();\nconst response = {\n  runbook_status: \"accepted\",\n  message: \"n8n webhook ранбука этапа 4 получил авторизованный запрос.\",\n  invocation_id: invocation.invocation_id,\n  action_id: actionId,\n  parameters,\n  accepted_at: acceptedAt,\n  async_delivery: false\n};\n\nif (!asyncCallback) {\n  diagnostic(\"Basic\", \"stage4_direct_request_accepted\", { action_id: actionId });\n  return [\n    {\n      json: {\n        shouldPublishKafka: false,\n        statusCode: 200,\n        response\n      }\n    }\n  ];\n}\n\nconst requiredFields = [\n  \"source\",\n  \"case_id\",\n  \"wait_id\",\n  \"correlation_id\",\n  \"event_type\",\n  \"idempotency_key_base\",\n  \"result_transport\"\n];\nconst missingFields = requiredFields.filter((field) => !stringValue(asyncCallback[field]));\n\nif (missingFields.length > 0) {\n  return error(\n    400,\n    \"missing_async_callback_fields\",\n    \"Не указаны обязательные поля invocation.extensions.async_callback.\",\n    { missing_fields: missingFields }\n  );\n}\n\nconst resultTransport = stringValue(asyncCallback.result_transport);\nconst allowedTransports = new Set([\"http_callback\", \"kafka_event\", \"both\"]);\n\nif (!allowedTransports.has(resultTransport)) {\n  return error(\n    400,\n    \"invalid_result_transport\",\n    \"Поле invocation.extensions.async_callback.result_transport должно быть http_callback, kafka_event или both.\"\n  );\n}\n\nconst needsCallback = resultTransport === \"http_callback\" || resultTransport === \"both\";\nconst needsKafka = resultTransport === \"kafka_event\" || resultTransport === \"both\";\n\nif (needsCallback && !stringValue(asyncCallback.callback_url)) {\n  return error(\n    400,\n    \"missing_callback_url\",\n    \"Поле invocation.extensions.async_callback.callback_url обязательно для http_callback или both.\"\n  );\n}\n\nif (needsKafka && !stringValue(asyncCallback.result_topic)) {\n  return error(\n    400,\n    \"missing_result_topic\",\n    \"Поле invocation.extensions.async_callback.result_topic обязательно для kafka_event или both.\"\n  );\n}\n\nconst externalEvent = buildExternalEvent(asyncCallback, { ...invocation, action_id: actionId }, parameters, acceptedAt);\n\nif (needsCallback) {\n  const callbackToken = callbackTokenFor(asyncCallback.source);\n  if (!callbackToken) {\n    return error(500, \"missing_callback_token\", \"Callback token is not configured for HTTP callback delivery.\");\n  }\n  const httpRequest = this?.helpers?.httpRequest?.bind(this.helpers);\n  if (!httpRequest) {\n    return error(500, \"http_request_helper_unavailable\", \"n8n httpRequest helper is not available in Code node.\");\n  }\n  try {\n    await httpRequest({\n      method: \"POST\",\n      url: asyncCallback.callback_url,\n      headers: {\n        \"Content-Type\": \"application/json\",\n        \"X-ServiceDesk-Callback-Token\": callbackToken\n      },\n      body: externalEvent,\n      json: true\n    });\n    diagnostic(\"Basic\", \"stage4_external_event_callback_sent\", {\n      source: externalEvent.source,\n      case_id: externalEvent.case_id,\n      wait_id: externalEvent.wait_id,\n      correlation_id: externalEvent.correlation_id,\n      event_id: externalEvent.event_id\n    });\n  } catch {\n    return error(502, \"callback_delivery_failed\", \"ExternalEvent HTTP callback delivery failed.\");\n  }\n}\n\nresponse.async_delivery = true;\nresponse.correlation_id = asyncCallback.correlation_id;\nresponse.wait_id = asyncCallback.wait_id;\nresponse.result_transport = resultTransport;\nresponse.result_topic = asyncCallback.result_topic || null;\nresponse.has_callback_url = Boolean(asyncCallback.callback_url);\n\ndiagnostic(\"Basic\", \"stage4_async_request_accepted\", {\n  source: externalEvent.source,\n  case_id: externalEvent.case_id,\n  wait_id: externalEvent.wait_id,\n  correlation_id: externalEvent.correlation_id,\n  event_id: externalEvent.event_id,\n  result_transport: resultTransport\n});\n\nreturn [\n  {\n    json: {\n      shouldPublishKafka: needsKafka,\n      kafkaTopic: asyncCallback.result_topic || \"\",\n      kafkaHeaders: JSON.stringify({\n        schema_version: externalEvent.schema_version,\n        source: externalEvent.source,\n        event_type: externalEvent.event_type,\n        correlation_id: externalEvent.correlation_id,\n        idempotency_key: externalEvent.idempotency_key\n      }),\n      externalEvent,\n      statusCode: 200,\n      response\n    }\n  }\n];"
       },
-      "id": "stage4-runbook-token-check",
-      "name": "Проверка токена webhook",
+      "id": "stage4-runbook-prepare",
+      "name": "Подготовка ответа и ExternalEvent",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         520,
         300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.shouldPublishKafka }}",
+              "operation": "equal",
+              "value2": true
+            }
+          ]
+        },
+        "combineOperation": "all"
+      },
+      "id": "stage4-runbook-if-kafka",
+      "name": "Нужна Kafka delivery?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        800,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "topic": "={{ $json.kafkaTopic }}",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify($json.externalEvent) }}",
+        "jsonParameters": true,
+        "useSchemaRegistry": false,
+        "useKey": true,
+        "key": "={{ $json.externalEvent.case_id }}",
+        "headerParametersJson": "={{ $json.kafkaHeaders }}",
+        "options": {
+          "acks": true,
+          "compression": false,
+          "timeout": 30000
+        }
+      },
+      "id": "stage4-runbook-kafka-publish",
+      "name": "Публикация ExternalEvent в Kafka",
+      "type": "n8n-nodes-base.kafka",
+      "typeVersion": 1,
+      "position": [
+        1080,
+        200
+      ],
+      "credentials": {
+        "kafka": {
+          "id": "localRedpandaKafka",
+          "name": "Local Redpanda Kafka"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [\n  {\n    json: {\n      statusCode: 200,\n      response: {\n        runbook_status: \"accepted\",\n        message: \"n8n webhook ранбука этапа 4 получил авторизованный запрос; ExternalEvent опубликован в Kafka.\",\n        async_delivery: true,\n        kafka_delivery: true\n      }\n    }\n  }\n];"
+      },
+      "id": "stage4-runbook-kafka-response",
+      "name": "Ответ после Kafka delivery",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        200
       ]
     },
     {
@@ -45,7 +111,7 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        800,
+        1640,
         300
       ]
     }
@@ -55,14 +121,54 @@
       "main": [
         [
           {
-            "node": "Проверка токена webhook",
+            "node": "Подготовка ответа и ExternalEvent",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Проверка токена webhook": {
+    "Подготовка ответа и ExternalEvent": {
+      "main": [
+        [
+          {
+            "node": "Нужна Kafka delivery?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Нужна Kafka delivery?": {
+      "main": [
+        [
+          {
+            "node": "Публикация ExternalEvent в Kafka",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Нормализованный ответ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Публикация ExternalEvent в Kafka": {
+      "main": [
+        [
+          {
+            "node": "Ответ после Kafka delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ответ после Kafka delivery": {
       "main": [
         [
           {

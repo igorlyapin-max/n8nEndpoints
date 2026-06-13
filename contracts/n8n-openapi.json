@@ -21,6 +21,10 @@
       "description": "Email dispatch webhooks"
     },
     {
+      "name": "zabbix",
+      "description": "Zabbix problem update webhooks"
+    },
+    {
       "name": "runbooks",
       "description": "Operational runbook webhooks"
     }
@@ -41,6 +45,29 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/OpenApiDocument"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook/contracts/email-templates.json": {
+      "get": {
+        "operationId": "getEmailTemplateCatalog",
+        "tags": [
+          "contracts",
+          "email"
+        ],
+        "summary": "Get the email template catalog",
+        "description": "Returns the repo-backed email template catalog used by templated email dispatch.",
+        "responses": {
+          "200": {
+            "description": "Email template catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailTemplateCatalog"
                 }
               }
             }
@@ -159,14 +186,332 @@
         }
       }
     },
+    "/webhook/email/send-template": {
+      "post": {
+        "operationId": "sendTemplatedEmail",
+        "tags": [
+          "email"
+        ],
+        "summary": "Send a text email rendered from a catalog template",
+        "description": "Validates template parameters, renders subject/body from the repo-backed email template catalog, and sends the text email through the SMTP credential bound in n8n.",
+        "security": [
+          {
+            "ServiceDeskWebhookToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendTemplatedEmailRequest"
+              },
+              "examples": {
+                "providerLineRepair": {
+                  "summary": "Provider line repair request",
+                  "value": {
+                    "to": [
+                      "automation-test@local.test"
+                    ],
+                    "cc": [
+                      "cc@local.test"
+                    ],
+                    "replyTo": "sender@local.test",
+                    "templateId": "provider_line_repair_request",
+                    "params": {
+                      "localTicketNumber": "ГКМ12345678",
+                      "lineId": "L-100500",
+                      "serviceAddress": "Москва, ул. Тестовая, д. 1",
+                      "problemDescription": "Нет связи на линии с 10:15 МСК",
+                      "contactName": "Иван Иванов",
+                      "contactPhone": "+7 999 000-00-00",
+                      "impact": "Полная недоступность сервиса",
+                      "preferredContactHours": "09:00-18:00 МСК"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Email was accepted by the n8n Send Email node",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendEmailResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation or template rendering failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "unknownTemplate": {
+                    "value": {
+                      "error": {
+                        "code": "unknown_template_id",
+                        "message": "Шаблон email не найден.",
+                        "templateId": "missing_template"
+                      }
+                    }
+                  },
+                  "missingTemplateParams": {
+                    "value": {
+                      "error": {
+                        "code": "missing_template_params",
+                        "message": "Не указаны обязательные параметры шаблона.",
+                        "templateId": "provider_line_repair_request",
+                        "missing_params": [
+                          "localTicketNumber"
+                        ]
+                      }
+                    }
+                  },
+                  "attachmentsNotSupported": {
+                    "value": {
+                      "error": {
+                        "code": "attachments_not_supported",
+                        "message": "Attachments are not supported in v1."
+                      }
+                    }
+                  },
+                  "invalidTemplateParam": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_template_param",
+                        "message": "Параметр шаблона не прошел валидацию.",
+                        "templateId": "provider_channel_outage_test",
+                        "param_name": "ip_address",
+                        "reason": "pattern_mismatch"
+                      }
+                    }
+                  },
+                  "invalidRenderedSubject": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_rendered_subject",
+                        "message": "После подстановки шаблона тема письма содержит недопустимые символы.",
+                        "templateId": "provider_channel_outage_test"
+                      }
+                    }
+                  },
+                  "renderedSubjectTooLong": {
+                    "value": {
+                      "error": {
+                        "code": "rendered_subject_too_long",
+                        "message": "После подстановки шаблона тема письма слишком длинная.",
+                        "templateId": "provider_channel_outage_test"
+                      }
+                    }
+                  },
+                  "renderedBodyTooLong": {
+                    "value": {
+                      "error": {
+                        "code": "rendered_body_too_long",
+                        "message": "После подстановки шаблона тело письма слишком длинное.",
+                        "templateId": "provider_channel_outage_test"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid webhook token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The n8n SMTP node failed to send the email",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook/zabbix/problem/update": {
+      "post": {
+        "operationId": "updateZabbixProblem",
+        "tags": [
+          "zabbix"
+        ],
+        "summary": "Append a message to a Zabbix problem by UI URL",
+        "description": "Parses a Zabbix UI problem URL, verifies eventid/triggerid through problem.get, and appends the caller-provided message through event.acknowledge. This endpoint is non-idempotent: every successful call appends a new Zabbix update message.",
+        "security": [
+          {
+            "ServiceDeskWebhookToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateZabbixProblemRequest"
+              },
+              "examples": {
+                "zabbixUiUrl": {
+                  "summary": "Update by Zabbix UI URL",
+                  "value": {
+                    "problemUrl": "http://localhost:8081/tr_events.php?triggerid=61119&eventid=90528",
+                    "message": "Создано обращение провайдеру: ГКМ Наряд № 12345678"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Zabbix problem event was updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateZabbixProblemResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed, Zabbix origin is not configured, or registry environment variables are malformed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "invalidRegistry": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_zabbix_registry",
+                        "message": "Zabbix registry environment variables must be valid JSON objects."
+                      }
+                    }
+                  },
+                  "missingProblemUrl": {
+                    "value": {
+                      "error": {
+                        "code": "missing_problem_url",
+                        "message": "Поле problemUrl обязательно."
+                      }
+                    }
+                  },
+                  "invalidProblemUrl": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_problem_url",
+                        "message": "Поле problemUrl должно быть корректным URL."
+                      }
+                    }
+                  },
+                  "messageTooLong": {
+                    "value": {
+                      "error": {
+                        "code": "message_too_long",
+                        "message": "Поле message не должно превышать 2000 символов."
+                      }
+                    }
+                  },
+                  "unknownOrigin": {
+                    "value": {
+                      "error": {
+                        "code": "unknown_zabbix_origin",
+                        "message": "Для zabbix_origin не найден API token в ZABBIX_API_TOKENS_BY_ORIGIN.",
+                        "zabbix_origin": "http://localhost:8081"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid webhook token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Zabbix problem was not found by eventid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "eventid was found but does not belong to the triggerid from the URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Zabbix JSON-RPC call failed. Upstream error details are not echoed to the caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "problemGetFailed": {
+                    "value": {
+                      "error": {
+                        "code": "zabbix_problem_get_failed",
+                        "message": "Zabbix problem.get failed."
+                      }
+                    }
+                  },
+                  "acknowledgeFailed": {
+                    "value": {
+                      "error": {
+                        "code": "zabbix_event_acknowledge_failed",
+                        "message": "Zabbix event.acknowledge failed."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/webhook/servicedesk/runbook/start": {
       "post": {
         "operationId": "startRunbook",
         "tags": [
           "runbooks"
         ],
-        "summary": "Start the stage 4 ServiceDesk runbook",
-        "description": "Accepts an approved ServiceDesk action request and returns a normalized acknowledgement.",
+        "summary": "Start a ServiceDesk runbook",
+        "description": "Accepts an approved ServiceDesk action request over direct HTTP or through the ServiceDesk async wrapper. Direct calls return a normalized acknowledgement. Async calls also deliver a canonical ServiceDesk ExternalEvent through the callback or Kafka transport described in invocation.extensions.async_callback. The current stage4 workflow is a safe stub: it emits terminal success immediately after accepting the request; a production long-running runbook must emit the same ExternalEvent only after real completion.",
         "security": [
           {
             "ServiceDeskWebhookToken": []
@@ -180,7 +525,8 @@
                 "$ref": "#/components/schemas/StartRunbookRequest"
               },
               "examples": {
-                "stage4": {
+                "directHttpSimple": {
+                  "summary": "Direct HTTP invocation",
                   "value": {
                     "invocation": {
                       "invocation_id": "example-invocation",
@@ -190,6 +536,34 @@
                       "source": "servicedesk"
                     }
                   }
+                },
+                "serviceDeskAsync": {
+                  "summary": "ServiceDesk async invocation package",
+                  "value": {
+                    "invocation": {
+                      "invocation_id": "cmd-123",
+                      "action_id": "start_systemcenter_runbook",
+                      "extensions": {
+                        "async_callback": {
+                          "source": "n8n",
+                          "case_id": "case-000000000001",
+                          "ticket_id": "ticket-000000000001",
+                          "run_id": "run-000000000001",
+                          "wait_id": "wait-000000000001",
+                          "correlation_id": "case-000000000001:tool_command:cmd-123",
+                          "event_type": "start_systemcenter_runbook_completed",
+                          "callback_url": "http://127.0.0.1:18088/external-events/n8n",
+                          "idempotency_key_base": "case-000000000001:tool_command:cmd-123",
+                          "result_transport": "both",
+                          "result_topic": "external.events"
+                        }
+                      }
+                    },
+                    "parameters": {
+                      "source": "servicedesk",
+                      "channelName": "provider-link-1"
+                    }
+                  }
                 }
               }
             }
@@ -197,11 +571,55 @@
         },
         "responses": {
           "200": {
-            "description": "Runbook request accepted by n8n",
+            "description": "Runbook request accepted by n8n. Async stage4 stub also delivered or prepared the canonical ExternalEvent according to result_transport.",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/StartRunbookResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "missingActionId": {
+                    "value": {
+                      "error": {
+                        "code": "missing_action_id",
+                        "message": "Поле invocation.action_id обязательно."
+                      }
+                    }
+                  },
+                  "invalidResultTransport": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_result_transport",
+                        "message": "Поле invocation.extensions.async_callback.result_transport должно быть http_callback, kafka_event или both."
+                      }
+                    }
+                  },
+                  "missingCallbackUrl": {
+                    "value": {
+                      "error": {
+                        "code": "missing_callback_url",
+                        "message": "Поле invocation.extensions.async_callback.callback_url обязательно для http_callback или both."
+                      }
+                    }
+                  },
+                  "missingResultTopic": {
+                    "value": {
+                      "error": {
+                        "code": "missing_result_topic",
+                        "message": "Поле invocation.extensions.async_callback.result_topic обязательно для kafka_event или both."
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -212,6 +630,46 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Runtime configuration required for callback delivery is missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "missingCallbackToken": {
+                    "value": {
+                      "error": {
+                        "code": "missing_callback_token",
+                        "message": "Callback token is not configured for HTTP callback delivery."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "ExternalEvent callback delivery failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "callbackDeliveryFailed": {
+                    "value": {
+                      "error": {
+                        "code": "callback_delivery_failed",
+                        "message": "ExternalEvent HTTP callback delivery failed."
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -234,6 +692,120 @@
         "type": "object",
         "description": "OpenAPI 3.1 document."
       },
+      "EmailTemplateCatalog": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schema_version",
+          "templates"
+        ],
+        "properties": {
+          "schema_version": {
+            "const": "1.0"
+          },
+          "templates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EmailTemplate"
+            },
+            "minItems": 1
+          }
+        }
+      },
+      "EmailTemplate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "template_id",
+          "display_name",
+          "subject_template",
+          "body_template",
+          "required_params",
+          "params"
+        ],
+        "properties": {
+          "template_id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_.-]*$"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "subject_template": {
+            "type": "string",
+            "description": "Plain text subject template with {{paramName}} placeholders."
+          },
+          "body_template": {
+            "type": "string",
+            "description": "Plain text body template with {{paramName}} placeholders."
+          },
+          "required_params": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$"
+            },
+            "uniqueItems": true
+          },
+          "optional_params": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$"
+            },
+            "uniqueItems": true
+          },
+          "params": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EmailTemplateParam"
+            },
+            "minItems": 1
+          }
+        }
+      },
+      "EmailTemplateParam": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "type",
+          "required",
+          "description"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$"
+          },
+          "type": {
+            "enum": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "example": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          }
+        }
+      },
       "EmailAddressList": {
         "oneOf": [
           {
@@ -251,6 +823,24 @@
               "format": "email"
             },
             "minItems": 1
+          }
+        ]
+      },
+      "TemplateParams": {
+        "type": "object",
+        "description": "Template parameter object. Runtime validation enforces required parameters, declared primitive type, optional catalog pattern, max 2000 characters per value, and rejects control characters/CRLF. Rendered subject must be one line and <= 500 chars; rendered body must be <= 20000 chars.",
+        "additionalProperties": {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ]
+        },
+        "examples": [
+          {
+            "localTicketNumber": "ГКМ12345678",
+            "lineId": "L-100500"
           }
         ]
       },
@@ -319,6 +909,70 @@
           ]
         }
       },
+      "SendTemplatedEmailRequest": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "to",
+          "templateId",
+          "params"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "description": "Optional caller request identifier. The workflow also accepts requestId."
+          },
+          "requestId": {
+            "type": "string",
+            "description": "Optional caller request identifier alias."
+          },
+          "to": {
+            "$ref": "#/components/schemas/EmailAddressList"
+          },
+          "cc": {
+            "$ref": "#/components/schemas/EmailAddressList"
+          },
+          "bcc": {
+            "$ref": "#/components/schemas/EmailAddressList"
+          },
+          "replyTo": {
+            "type": "string",
+            "format": "email"
+          },
+          "reply_to": {
+            "type": "string",
+            "format": "email",
+            "description": "Alias accepted by the workflow for replyTo."
+          },
+          "templateId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Template identifier from the email template catalog."
+          },
+          "params": {
+            "$ref": "#/components/schemas/TemplateParams"
+          }
+        },
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "attachment"
+              ]
+            },
+            {
+              "required": [
+                "attachments"
+              ]
+            },
+            {
+              "required": [
+                "files"
+              ]
+            }
+          ]
+        }
+      },
       "SendEmailResponse": {
         "type": "object",
         "additionalProperties": false,
@@ -331,30 +985,248 @@
           }
         }
       },
+      "UpdateZabbixProblemRequest": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "problemUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Full Zabbix UI problem URL containing triggerid and eventid query parameters. Only http/https URLs without embedded username/password are accepted. The workflow also accepts problem_url."
+          },
+          "problem_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Alias accepted by the workflow for problemUrl. Only http/https URLs without embedded username/password are accepted."
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Message text sent to Zabbix without a custom date/time prefix. The workflow appends a newline; Zabbix displays the operation time itself.",
+            "maxLength": 2000
+          }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "problemUrl"
+            ]
+          },
+          {
+            "required": [
+              "problem_url"
+            ]
+          }
+        ],
+        "description": "Non-idempotent request: each successful call appends one new Zabbix update message."
+      },
+      "UpdateZabbixProblemResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "eventid",
+          "triggerid",
+          "zabbix_origin",
+          "message"
+        ],
+        "properties": {
+          "status": {
+            "const": "updated"
+          },
+          "eventid": {
+            "type": "string"
+          },
+          "triggerid": {
+            "type": "string"
+          },
+          "zabbix_origin": {
+            "type": "string",
+            "format": "uri"
+          },
+          "message": {
+            "type": "string",
+            "description": "Message sent to event.acknowledge."
+          },
+          "problem": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
       "StartRunbookRequest": {
         "type": "object",
         "additionalProperties": true,
+        "required": [
+          "invocation"
+        ],
         "properties": {
           "invocation": {
-            "type": "object",
-            "additionalProperties": true,
-            "properties": {
-              "invocation_id": {
-                "type": "string"
-              },
-              "action_id": {
-                "type": "string",
-                "examples": [
-                  "start_systemcenter_runbook"
-                ]
-              }
-            }
+            "$ref": "#/components/schemas/RunbookInvocation"
           },
           "parameters": {
             "type": "object",
             "additionalProperties": true
           }
         }
+      },
+      "RunbookInvocation": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "action_id"
+        ],
+        "properties": {
+          "invocation_id": {
+            "type": "string",
+            "description": "Optional caller command or invocation identifier."
+          },
+          "action_id": {
+            "type": "string",
+            "minLength": 1,
+            "examples": [
+              "start_systemcenter_runbook"
+            ]
+          },
+          "extensions": {
+            "$ref": "#/components/schemas/RunbookInvocationExtensions"
+          }
+        }
+      },
+      "RunbookInvocationExtensions": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "async_callback": {
+            "$ref": "#/components/schemas/AsyncCallbackPackage"
+          }
+        }
+      },
+      "AsyncCallbackPackage": {
+        "type": "object",
+        "additionalProperties": true,
+        "description": "ServiceDesk async completion package. n8n publishes the final runbook result as the canonical ExternalEvent using these correlation fields; HTTP and Kafka are transports, not separate business contracts.",
+        "required": [
+          "source",
+          "case_id",
+          "wait_id",
+          "correlation_id",
+          "event_type",
+          "idempotency_key_base",
+          "result_transport"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "case_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^case-[a-f0-9]{12}$"
+          },
+          "ticket_id": {
+            "type": "string",
+            "description": "Optional ServiceDesk ticket id."
+          },
+          "run_id": {
+            "type": "string",
+            "pattern": "^run-[a-f0-9]{12}$"
+          },
+          "wait_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^wait-[a-f0-9]{12}$"
+          },
+          "correlation_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "event_type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "callback_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Required when result_transport is http_callback or both."
+          },
+          "result_transport": {
+            "$ref": "#/components/schemas/RunbookResultTransport"
+          },
+          "result_topic": {
+            "type": "string",
+            "description": "Required when result_transport is kafka_event or both. Default ServiceDesk local topic is external.events."
+          },
+          "idempotency_key_base": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "result_transport": {
+                  "const": "http_callback"
+                }
+              },
+              "required": [
+                "result_transport"
+              ]
+            },
+            "then": {
+              "required": [
+                "callback_url"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "result_transport": {
+                  "const": "kafka_event"
+                }
+              },
+              "required": [
+                "result_transport"
+              ]
+            },
+            "then": {
+              "required": [
+                "result_topic"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "result_transport": {
+                  "const": "both"
+                }
+              },
+              "required": [
+                "result_transport"
+              ]
+            },
+            "then": {
+              "required": [
+                "callback_url",
+                "result_topic"
+              ]
+            }
+          }
+        ]
+      },
+      "RunbookResultTransport": {
+        "enum": [
+          "http_callback",
+          "kafka_event",
+          "both"
+        ]
       },
       "StartRunbookResponse": {
         "type": "object",
@@ -385,6 +1257,46 @@
           "parameters": {
             "type": "object",
             "additionalProperties": true
+          },
+          "accepted_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "async_delivery": {
+            "type": "boolean",
+            "description": "True when invocation.extensions.async_callback was accepted."
+          },
+          "correlation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "wait_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result_transport": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RunbookResultTransport"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result_topic": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "has_callback_url": {
+            "type": "boolean",
+            "description": "True when callback_url was provided without echoing the URL value."
           }
         }
       },

@@ -11,6 +11,18 @@
       "contract_url": "http://127.0.0.1:5678/webhook/contracts/openapi.json",
       "execution_url": "http://127.0.0.1:5678/webhook/servicedesk/runbook/start",
       "openapi_operation_id": "startRunbook",
+      "result_delivery": {
+        "canonical_event": "ServiceDesk ExternalEvent",
+        "async_callback_path": "invocation.extensions.async_callback",
+        "supported_transports": [
+          "http_callback",
+          "kafka_event",
+          "both"
+        ],
+        "default_transport": "kafka_event",
+        "default_result_topic": "external.events",
+        "current_stage4_behavior": "safe_stub_immediate_success"
+      },
       "operations": [
         "start_systemcenter_runbook"
       ],
@@ -26,7 +38,7 @@
       "business_scenario": "zabbix_problem_processing",
       "endpoint_id": "n8n",
       "callback_endpoint_id": "n8n",
-      "enabled": true,
+      "enabled": false,
       "operations": [
         "check_zabbix_status"
       ],
@@ -34,7 +46,29 @@
         "restart_supported": false,
         "cancel_supported": false,
         "execution_history_supported": false
-      }
+      },
+      "lifecycle": "internal_placeholder",
+      "description": "Internal placeholder only. External callers must use workflow_id zabbix_problem_update and OpenAPI operationId updateZabbixProblem."
+    },
+    {
+      "workflow_id": "zabbix_problem_update",
+      "display_name": "Обновление Zabbix problem по URL",
+      "business_scenario": "zabbix_problem_update",
+      "endpoint_id": "n8n",
+      "callback_endpoint_id": "n8n",
+      "enabled": true,
+      "contract_url": "http://127.0.0.1:5678/webhook/contracts/openapi.json",
+      "execution_url": "http://127.0.0.1:5678/webhook/zabbix/problem/update",
+      "openapi_operation_id": "updateZabbixProblem",
+      "operations": [
+        "update_zabbix_problem"
+      ],
+      "management": {
+        "restart_supported": false,
+        "cancel_supported": false,
+        "execution_history_supported": false
+      },
+      "non_idempotent": true
     },
     {
       "workflow_id": "email_dispatch",
@@ -54,6 +88,45 @@
         "cancel_supported": false,
         "execution_history_supported": false
       }
+    },
+    {
+      "workflow_id": "email_template_catalog",
+      "display_name": "Публикация каталога email-шаблонов",
+      "business_scenario": "email_template_catalog",
+      "endpoint_id": "n8n",
+      "callback_endpoint_id": "n8n",
+      "enabled": true,
+      "contract_url": "http://127.0.0.1:5678/webhook/contracts/openapi.json",
+      "execution_url": "http://127.0.0.1:5678/webhook/contracts/email-templates.json",
+      "openapi_operation_id": "getEmailTemplateCatalog",
+      "operations": [
+        "discover_email_templates"
+      ],
+      "management": {
+        "restart_supported": false,
+        "cancel_supported": false,
+        "execution_history_supported": false
+      }
+    },
+    {
+      "workflow_id": "templated_email_dispatch",
+      "display_name": "Отправка email по шаблону через n8n",
+      "business_scenario": "templated_email_dispatch",
+      "endpoint_id": "n8n",
+      "callback_endpoint_id": "n8n",
+      "enabled": true,
+      "contract_url": "http://127.0.0.1:5678/webhook/contracts/openapi.json",
+      "execution_url": "http://127.0.0.1:5678/webhook/email/send-template",
+      "openapi_operation_id": "sendTemplatedEmail",
+      "operations": [
+        "send_templated_email"
+      ],
+      "management": {
+        "restart_supported": false,
+        "cancel_supported": false,
+        "execution_history_supported": false
+      },
+      "template_catalog_url": "http://127.0.0.1:5678/webhook/contracts/email-templates.json"
     },
     {
       "workflow_id": "contract_discovery",

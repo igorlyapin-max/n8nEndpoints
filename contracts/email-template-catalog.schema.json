@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://servicedeskagents.local/contracts/config/email-template-catalog.schema.json",
+  "title": "Email Template Catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "templates"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "templates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/template"
+      }
+    }
+  },
+  "$defs": {
+    "template": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "template_id",
+        "display_name",
+        "subject_template",
+        "body_template",
+        "required_params",
+        "params"
+      ],
+      "properties": {
+        "template_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-z][a-z0-9_.-]*$"
+        },
+        "display_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "subject_template": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "body_template": {
+          "type": "string",
+          "minLength": 1
+        },
+        "required_params": {
+          "$ref": "#/$defs/paramNameList"
+        },
+        "optional_params": {
+          "$ref": "#/$defs/paramNameList"
+        },
+        "params": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/param"
+          }
+        }
+      }
+    },
+    "paramNameList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/paramName"
+      },
+      "uniqueItems": true
+    },
+    "paramName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": "^[A-Za-z][A-Za-z0-9_.-]*$"
+    },
+    "param": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "type",
+        "required",
+        "description"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/paramName"
+        },
+        "type": {
+          "enum": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "pattern": {
+          "type": "string",
+          "minLength": 1
+        },
+        "example": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        }
+      }
+    }
+  }
+}

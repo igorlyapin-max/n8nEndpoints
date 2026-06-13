@@ -16,9 +16,13 @@ Workflow `Contracts: OpenAPI discovery` отдает OpenAPI 3.1 контрак�
 ## Caller Flow
 
 1. Внешнее приложение вызывает `GET /webhook/contracts/openapi.json`.
-2. По `operationId` выбирает нужную операцию, например `sendEmail` или `startRunbook`.
+2. По `operationId` выбирает нужную операцию, например `sendEmail`, `sendTemplatedEmail`, `getEmailTemplateCatalog`, `updateZabbixProblem` или `startRunbook`.
 3. Для action endpoint берет path, schema и security scheme из OpenAPI.
 4. При выполнении action endpoint передает `X-ServiceDesk-Token`.
+
+Для отправки по шаблону caller сначала вызывает `getEmailTemplateCatalog`, затем передает выбранный `templateId` и `params` в `sendTemplatedEmail`.
+
+Для async runbook caller использует тот же `startRunbook`, но добавляет `invocation.extensions.async_callback`. Этот блок описывает, куда вернуть итоговый ServiceDesk `ExternalEvent`: через `callback_url`, через Kafka `result_topic` или через оба транспорта. Никакой отдельный n8n endpoint для Kafka-обертки не публикуется.
 
 ## Response
 
