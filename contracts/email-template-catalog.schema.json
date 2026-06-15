@@ -113,6 +113,11 @@
           "minLength": 1,
           "maxLength": 1000
         },
+        "sensitive": {
+          "type": "boolean",
+          "default": false,
+          "description": "Marks a parameter whose value must not be logged or stored outside the approved business process."
+        },
         "pattern": {
           "type": "string",
           "minLength": 1

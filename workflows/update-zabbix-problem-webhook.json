@@ -48,6 +48,54 @@
         800,
         300
       ]
+    },
+    {
+      "parameters": {
+        "content": "### Webhook обновления Zabbix problem\n\nДелает: Принимает POST /webhook/zabbix/problem/update с problemUrl/problem_url и message.\n\nОпирается на: Header X-ServiceDesk-Token и production webhook registration.\n\nОшибки/ветки: Без token workflow возвращает 401; отсутствие URL/message обрабатывает Code node.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "update-zabbix-problem-webhook-note",
+      "name": "Note: Webhook обновления Zabbix problem",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        470
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Обновление Zabbix problem\n\nДелает: Валидирует вход, ищет Zabbix token по origin, проверяет problem.get и добавляет message через event.acknowledge.\n\nОпирается на: N8N_WEBHOOK_TOKEN, env access, ZABBIX_API_TOKENS_BY_ORIGIN, optional ZABBIX_API_URLS_BY_ORIGIN и this.helpers.httpRequest.\n\nОшибки/ветки: 400 для validation/registry/origin, 404 problem not found, 409 trigger mismatch, 502 для problem.get или event.acknowledge failures.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "update-zabbix-problem-run-note",
+      "name": "Note: Обновление Zabbix problem",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        520,
+        470
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Нормализованный ответ\n\nДелает: Возвращает JSON результата update или structured error caller-у.\n\nОпирается на: statusCode и response из Code node.\n\nОшибки/ветки: Неверная response shape нарушает OpenAPI contract updateZabbixProblem.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "update-zabbix-problem-response-note",
+      "name": "Note: Нормализованный ответ",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        800,
+        470
+      ]
     }
   ],
   "connections": {
@@ -76,6 +124,10 @@
   },
   "active": false,
   "settings": {
-    "executionOrder": "v1"
-  }
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false
+  },
+  "description": "Логика работы: добавляет message в Zabbix problem event по UI URL без собственного timestamp.\n\nWorkflow валидирует X-ServiceDesk-Token, парсит eventid/triggerid, проверяет problem.get и выполняет event.acknowledge action=4.\n\nОтладка: включить N8N_WORKFLOW_DEBUG=Basic, проверить Zabbix registry env, выполнить auth-negative/invalid-url smoke; happy path мутирует Zabbix history."
 }

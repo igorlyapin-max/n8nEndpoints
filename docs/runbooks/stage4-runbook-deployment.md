@@ -33,9 +33,13 @@ The n8n runtime must receive:
 - `N8N_WEBHOOK_TOKEN`
 - `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`
 - `N8N_WORKFLOW_DEBUG=off`, `Basic` or `Verbose`
+- `ORCHESTRATOR_PUBLIC_URL` is required outside local/dev when HTTP callback delivery is enabled; accepted `callback_url` values must stay under this origin/path
+- `NODE_ENV=production`, `N8N_ENVIRONMENT=production` or `ENVIRONMENT=production` in shared/staging/production so non-HTTPS callback URLs are rejected
 - `INTEGRATION_CALLBACK_TOKEN` or `INTEGRATION_CALLBACK_TOKEN__<NORMALIZED_SOURCE>` when `http_callback` or `both` delivery is enabled
 
 `N8N_WORKFLOW_DEBUG` is off by default. `Basic` logs safe structured events without tokens, callback URLs or full business payloads. Use `Verbose` only temporarily during diagnostics.
+
+n8n diagnostics must be available through stdout/stderr and one production logging sink such as syslog, collector/agent/sidecar, ELK/OpenSearch, or a platform log collector. Docker `json-file` alone is acceptable only for the local stand.
 
 Local ServiceDesk default Kafka result topic:
 
@@ -60,6 +64,15 @@ brokers: redpanda:9092
 ssl: false
 authentication: false
 ```
+
+Production Kafka credential must be selected by the administrator:
+
+```text
+SASL_SSL: broker TLS + SASL username/password or SCRAM mechanism + broker ACL limited to the result topic
+SSL/mTLS: broker TLS + CA + client certificate/key + broker ACL limited to the result topic
+```
+
+HTTP webhook and callback endpoints are configured separately from Kafka. Local examples use `http://`, but customer shared/staging/production URLs should be published through HTTPS, for example `https://n8n.example.ru/webhook` and `https://servicedesk.example.ru/external-events/n8n`.
 
 In the local ServiceDesk compose stack these values are configured for service `n8n` in `../serviceDeskAgents/docker-compose.yml`, with values loaded from `../serviceDeskAgents/.env`.
 
@@ -108,6 +121,18 @@ curl -i \
 
 Expected HTTP status: `400`, body contains `error.code: missing_action_id`.
 
+Callback policy-negative check:
+
+```bash
+curl -i \
+  -H 'Content-Type: application/json' \
+  -H "X-ServiceDesk-Token: $N8N_WEBHOOK_TOKEN" \
+  -d '{"invocation":{"invocation_id":"cmd-bad-callback","action_id":"start_systemcenter_runbook","extensions":{"async_callback":{"source":"n8n","case_id":"case-000000000001","ticket_id":"ticket-000000000001","run_id":"run-000000000001","wait_id":"wait-000000000001","correlation_id":"case-000000000001:tool_command:cmd-bad-callback","event_type":"start_systemcenter_runbook_completed","callback_url":"http://user:pass@127.0.0.1:18088/external-events/n8n","idempotency_key_base":"case-000000000001:tool_command:cmd-bad-callback","result_transport":"http_callback"}}},"parameters":{"source":"smoke"}}' \
+  http://127.0.0.1:5678/webhook/servicedesk/runbook/start
+```
+
+Expected HTTP status: `400`, body contains `error.code: invalid_callback_url`.
+
 Direct happy path:
 
 ```bash
@@ -143,6 +168,8 @@ curl -i \
 ```
 
 Expected HTTP status: `200`, and ServiceDesk must record the correlated `ExternalEvent`.
+
+After async smoke, inspect recent n8n logs for Code node errors. Production deployments should route those logs through the approved second sink; local Docker can be checked with `docker inspect servicedesk-agents-n8n --format '{{json .HostConfig.LogConfig}}'`.
 
 ## Rollback
 

@@ -33,9 +33,10 @@ node scripts/test-contracts.mjs
 1. Откройте n8n UI: `http://127.0.0.1:5678`.
 2. Импортируйте `workflows/send-templated-email-webhook.json`.
 3. Откройте node `Отправка email`.
-4. Выберите SMTP credential.
-5. Активируйте workflow.
-6. Если import/publish сообщает о необходимости обновить webhook registration, перезапустите n8n.
+4. Проверьте или выберите SMTP credential.
+5. Проверьте, что workflow execution data saving выключен для success, error и manual executions. Это обязательно, потому что шаблон `ad_password_reset_notification` передает параметр `password`.
+6. Активируйте workflow.
+7. Если import/publish сообщает о необходимости обновить webhook registration, перезапустите n8n.
 
 OpenAPI operationId для этого workflow: `sendTemplatedEmail`.
 
@@ -120,6 +121,24 @@ curl -fsS \
 {
   "status": "sent"
 }
+```
+
+Password notification render smoke выполняйте только на локальном mailbox или согласованном тестовом получателе. Не вставляйте реальный пароль в shell history, tickets или screenshots:
+
+```bash
+curl -fsS \
+  -H 'Content-Type: application/json' \
+  -H "X-ServiceDesk-Token: ${N8N_WEBHOOK_TOKEN}" \
+  -d '{
+    "to": ["automation-test@local.test"],
+    "templateId": "ad_password_reset_notification",
+    "params": {
+      "service_request": "12345678",
+      "employee_full_name": "Иванов Иван Иванович",
+      "password": "<generated-password>"
+    }
+  }' \
+  http://127.0.0.1:5678/webhook/email/send-template
 ```
 
 После happy path проверьте webmail `http://127.0.0.1:8087/`:

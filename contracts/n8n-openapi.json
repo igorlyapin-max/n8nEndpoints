@@ -5,6 +5,55 @@
     "version": "1.0.0",
     "description": "Machine-readable contract for externally callable n8n webhooks in the local ServiceDesk integration adapter."
   },
+  "x-localization": {
+    "selection": "query_parameter",
+    "query_parameter": "lang",
+    "default_locale": "en",
+    "supported_locales": [
+      "en",
+      "ru"
+    ],
+    "notes": "Only human-facing OpenAPI metadata is localized. Paths, operationIds, schema names, payload fields, enum/const values, error codes and auth headers stay stable across locales."
+  },
+  "x-transport-security": {
+    "http": {
+      "policy": "admin_configured",
+      "production_recommended_scheme": "https",
+      "configuration": {
+        "n8n_webhook_base_url_env": "N8N_WEBHOOK_BASE_URL",
+        "servicedesk_callback_base_url_env": "ORCHESTRATOR_PUBLIC_URL"
+      },
+      "callback_url_policy": {
+        "allowed_schemes": [
+          "https",
+          "http"
+        ],
+        "credentials_allowed": false,
+        "production_requires_https": true,
+        "local_http_exceptions": [
+          "localhost",
+          "127.0.0.1",
+          "::1",
+          "single-label compose hostnames"
+        ],
+        "orchestrator_public_url_env": "ORCHESTRATOR_PUBLIC_URL",
+        "orchestrator_public_url_match": "In non-local environments ORCHESTRATOR_PUBLIC_URL is required for HTTP callback delivery. callback_url must have the same origin and the same or nested path."
+      },
+      "notes": "Local/dev may use http://127.0.0.1. Shared, staging and production deployments should publish n8n webhooks and ServiceDesk callback URLs through HTTPS selected by the administrator."
+    },
+    "kafka": {
+      "policy": "credential_configured",
+      "supported_security_protocols": [
+        "SASL_SSL",
+        "SSL"
+      ],
+      "supported_auth": [
+        "sasl",
+        "mtls"
+      ],
+      "notes": "Kafka is secured through broker TLS/SASL/mTLS credentials and ACLs, not HTTPS. Local/dev may use PLAINTEXT."
+    }
+  },
   "servers": [
     {
       "url": "http://127.0.0.1:5678",
@@ -25,8 +74,20 @@
       "description": "Zabbix problem update webhooks"
     },
     {
+      "name": "cmdbuild",
+      "description": "CMDBuild lookup webhooks"
+    },
+    {
       "name": "runbooks",
       "description": "Operational runbook webhooks"
+    },
+    {
+      "name": "hr",
+      "description": "HR data export verification runbooks"
+    },
+    {
+      "name": "ad",
+      "description": "Active Directory lookup runbooks"
     }
   ],
   "paths": {
@@ -38,6 +99,22 @@
         ],
         "summary": "Get the OpenAPI contract for n8n webhooks",
         "description": "Returns the machine-readable contract that external applications use to discover execution endpoints and payload schemas.",
+        "parameters": [
+          {
+            "name": "lang",
+            "in": "query",
+            "required": false,
+            "description": "Language for human-readable descriptions in the OpenAPI document. Defaults to en when omitted.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "en",
+                "ru"
+              ],
+              "default": "en"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OpenAPI contract",
@@ -45,6 +122,31 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/OpenApiDocument"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported OpenAPI contract locale",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "unsupportedLocale": {
+                    "value": {
+                      "error": {
+                        "code": "unsupported_locale",
+                        "message": "Unsupported lang query parameter.",
+                        "locale": "de",
+                        "supported_locales": [
+                          "en",
+                          "ru"
+                        ]
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -612,6 +714,15 @@
                       }
                     }
                   },
+                  "invalidCallbackUrl": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_callback_url",
+                        "message": "callback_url не соответствует политике безопасности.",
+                        "reason": "https_required"
+                      }
+                    }
+                  },
                   "missingResultTopic": {
                     "value": {
                       "error": {
@@ -676,6 +787,1597 @@
           }
         }
       }
+    },
+    "/webhook/zabbix/problem/status": {
+      "post": {
+        "operationId": "getZabbixProblemStatus",
+        "tags": [
+          "zabbix"
+        ],
+        "summary": "Get Zabbix problem status by UI URL",
+        "description": "Parses a Zabbix UI problem URL and returns read-only status: problem, resolved, or ok. The workflow first checks event.get by eventid; if the original event is no longer available, it falls back to trigger.get by triggerid and returns ok when the trigger is currently OK.",
+        "security": [
+          {
+            "ServiceDeskWebhookToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetZabbixProblemStatusRequest"
+              },
+              "examples": {
+                "zabbixUiUrl": {
+                  "summary": "Read status by Zabbix UI URL",
+                  "value": {
+                    "problemUrl": "http://localhost:8081/tr_events.php?triggerid=61119&eventid=90528"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Zabbix problem status was resolved from event.get or trigger.get fallback",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetZabbixProblemStatusResponse"
+                },
+                "examples": {
+                  "activeProblem": {
+                    "value": {
+                      "status": "problem",
+                      "eventid": "90528",
+                      "triggerid": "61119",
+                      "zabbix_origin": "http://localhost:8081",
+                      "source": "event",
+                      "problem": {
+                        "name": "ICMP Ping: Unavailable by ICMP ping",
+                        "severity": "4",
+                        "acknowledged": "0",
+                        "event_value": "1",
+                        "recovery_eventid": "0",
+                        "recovery_clock": "0"
+                      }
+                    }
+                  },
+                  "okFallback": {
+                    "value": {
+                      "status": "ok",
+                      "eventid": "90528",
+                      "triggerid": "61119",
+                      "zabbix_origin": "http://localhost:8081",
+                      "source": "trigger_fallback",
+                      "problem": {
+                        "name": "ICMP Ping: Unavailable by ICMP ping",
+                        "severity": "4",
+                        "acknowledged": null,
+                        "event_value": null,
+                        "recovery_eventid": null,
+                        "recovery_clock": null,
+                        "trigger_value": "0"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed, Zabbix origin is not configured, or registry environment variables are malformed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "missingProblemUrl": {
+                    "value": {
+                      "error": {
+                        "code": "missing_problem_url",
+                        "message": "Поле problemUrl обязательно."
+                      }
+                    }
+                  },
+                  "invalidProblemUrl": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_problem_url",
+                        "message": "Поле problemUrl должно быть корректным URL."
+                      }
+                    }
+                  },
+                  "invalidRegistry": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_zabbix_registry",
+                        "message": "Zabbix registry environment variables must be valid JSON objects."
+                      }
+                    }
+                  },
+                  "unknownOrigin": {
+                    "value": {
+                      "error": {
+                        "code": "unknown_zabbix_origin",
+                        "message": "Для zabbix_origin не найден API token в ZABBIX_API_TOKENS_BY_ORIGIN.",
+                        "zabbix_origin": "http://localhost:8081"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid webhook token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Original event is not available and trigger was not found by triggerid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "triggerNotFound": {
+                    "value": {
+                      "error": {
+                        "code": "zabbix_trigger_not_found",
+                        "message": "Zabbix trigger не найден по triggerid."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "eventid was found but does not belong to the triggerid from the URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Zabbix JSON-RPC read call failed. Upstream error details are not echoed to the caller.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "eventGetFailed": {
+                    "value": {
+                      "error": {
+                        "code": "zabbix_event_get_failed",
+                        "message": "Zabbix event.get failed."
+                      }
+                    }
+                  },
+                  "triggerGetFailed": {
+                    "value": {
+                      "error": {
+                        "code": "zabbix_trigger_get_failed",
+                        "message": "Zabbix trigger.get failed."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook/zabbix/problem/wait": {
+      "post": {
+        "operationId": "waitZabbixProblemStatus",
+        "tags": [
+          "zabbix",
+          "runbooks"
+        ],
+        "summary": "Wait until a Zabbix problem becomes ok or resolved",
+        "description": "Async-only read-only runbook. It polls the existing getZabbixProblemStatus endpoint by Zabbix problem URL and completes when status becomes ok or resolved, or returns the factual problem state with timed_out=true when timeout expires.",
+        "x-result-delivery": {
+          "canonical_event": "ServiceDesk ExternalEvent",
+          "async_callback_path": "invocation.extensions.async_callback",
+          "result_schema": "#/components/schemas/WaitZabbixProblemStatusResult",
+          "supported_transports": [
+            "http_callback",
+            "kafka_event",
+            "both"
+          ],
+          "default_result_topic": "external.events"
+        },
+        "security": [
+          {
+            "ServiceDeskWebhookToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WaitZabbixProblemStatusRequest"
+              },
+              "examples": {
+                "asyncWait": {
+                  "summary": "Async wait for Zabbix recovery",
+                  "value": {
+                    "problemUrl": "http://localhost:8081/tr_events.php?triggerid=61119&eventid=90528",
+                    "poll_interval_minutes": 15,
+                    "timeout_minutes": 60,
+                    "invocation": {
+                      "invocation_id": "cmd-zabbix-wait-123",
+                      "action_id": "wait_zabbix_problem_status",
+                      "extensions": {
+                        "async_callback": {
+                          "source": "n8n",
+                          "case_id": "case-000000000001",
+                          "wait_id": "wait-000000000001",
+                          "correlation_id": "case-000000000001:tool_command:cmd-zabbix-wait-123",
+                          "event_type": "wait_zabbix_problem_status_completed",
+                          "idempotency_key_base": "case-000000000001:tool_command:cmd-zabbix-wait-123",
+                          "result_transport": "kafka_event",
+                          "result_topic": "external.events"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Runbook accepted. Terminal result is delivered asynchronously.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WaitZabbixProblemStatusAcceptedResponse"
+                },
+                "examples": {
+                  "accepted": {
+                    "value": {
+                      "runbook_status": "accepted",
+                      "message": "n8n Zabbix wait runbook принял запрос.",
+                      "invocation_id": "cmd-zabbix-wait-123",
+                      "action_id": "wait_zabbix_problem_status",
+                      "accepted_at": "2026-06-13T10:00:00.000Z",
+                      "async_delivery": true,
+                      "correlation_id": "case-000000000001:tool_command:cmd-zabbix-wait-123",
+                      "wait_id": "wait-000000000001",
+                      "result_transport": "kafka_event",
+                      "result_topic": "external.events",
+                      "has_callback_url": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "missingProblemUrl": {
+                    "value": {
+                      "error": {
+                        "code": "missing_problem_url",
+                        "message": "Поле problemUrl обязательно."
+                      }
+                    }
+                  },
+                  "missingAsyncCallback": {
+                    "value": {
+                      "error": {
+                        "code": "missing_async_callback",
+                        "message": "Для этого ранбука обязателен invocation.extensions.async_callback."
+                      }
+                    }
+                  },
+                  "invalidCallbackUrl": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_callback_url",
+                        "message": "callback_url не соответствует политике безопасности.",
+                        "reason": "credentials_not_allowed"
+                      }
+                    }
+                  },
+                  "missingResultTopic": {
+                    "value": {
+                      "error": {
+                        "code": "missing_result_topic",
+                        "message": "result_topic обязателен для kafka_event или both."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid webhook token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook/email/wait-for-ticket": {
+      "post": {
+        "operationId": "waitForEmailByTicket",
+        "tags": [
+          "email",
+          "runbooks"
+        ],
+        "summary": "Wait for an incoming email containing a ticket number",
+        "description": "Accepts polling interval, timeout and a ticket number. Async mode returns accepted immediately and later delivers OK, MULTI_MAIL, DELIVERY_FAILED or NOT_FOUND as a canonical ExternalEvent; direct mode is limited to short smoke waits.",
+        "security": [
+          {
+            "ServiceDeskWebhookToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WaitForEmailByTicketRequest"
+              },
+              "examples": {
+                "asyncWait": {
+                  "summary": "Async wait for provider reply",
+                  "value": {
+                    "ticket_number": "ГКМ123456",
+                    "poll_interval_minutes": 15,
+                    "timeout_minutes": 60,
+                    "invocation": {
+                      "invocation_id": "cmd-123",
+                      "action_id": "wait_for_email_by_ticket",
+                      "extensions": {
+                        "async_callback": {
+                          "source": "n8n",
+                          "case_id": "case-000000000001",
+                          "wait_id": "wait-000000000001",
+                          "correlation_id": "case-000000000001:tool_command:cmd-123",
+                          "event_type": "wait_for_email_by_ticket_completed",
+                          "idempotency_key_base": "case-000000000001:tool_command:cmd-123",
+                          "result_transport": "kafka_event",
+                          "result_topic": "external.events"
+                        }
+                      }
+                    }
+                  }
+                },
+                "directSmoke": {
+                  "summary": "Short direct smoke wait",
+                  "value": {
+                    "ticket_number": "ГКМ123456",
+                    "poll_interval_minutes": 1,
+                    "timeout_minutes": 5
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Accepted async wait or completed direct wait.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/WaitForEmailByTicketAcceptedResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/WaitForEmailByTicketResult"
+                    }
+                  ]
+                },
+                "examples": {
+                  "accepted": {
+                    "value": {
+                      "runbook_status": "accepted",
+                      "message": "n8n wait email runbook принял запрос на ожидание письма.",
+                      "invocation_id": "cmd-123",
+                      "action_id": "wait_for_email_by_ticket",
+                      "accepted_at": "2026-06-13T10:00:00.000Z",
+                      "async_delivery": true,
+                      "correlation_id": "case-000000000001:tool_command:cmd-123",
+                      "wait_id": "wait-000000000001",
+                      "result_transport": "kafka_event",
+                      "result_topic": "external.events",
+                      "has_callback_url": false
+                    }
+                  },
+                  "ok": {
+                    "value": {
+                      "status": "OK",
+                      "ticket_number": "ГКМ123456",
+                      "subject": "Re: заявка ГКМ123456",
+                      "body": "Ваше обращение зарегистрировано.",
+                      "body_truncated": false,
+                      "from": "provider@example.test",
+                      "received_at": "2026-06-13T10:05:00.000Z",
+                      "message_id": "<provider-1@example.test>",
+                      "mailbox": "INBOX",
+                      "is_delivery_failure": false,
+                      "delivery_failure_reason": null,
+                      "match_count": 1,
+                      "delivery_failure_count": 0,
+                      "poll_interval_minutes": 15,
+                      "timeout_minutes": 60,
+                      "started_at": "2026-06-13T10:00:00.000Z",
+                      "finished_at": "2026-06-13T10:05:00.000Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "directTimeoutTooLong": {
+                    "value": {
+                      "error": {
+                        "code": "direct_timeout_too_long",
+                        "message": "Direct HTTP режим ограничен timeout_minutes <= 5. Для 60 минут используйте async_callback."
+                      }
+                    }
+                  },
+                  "missingTicketNumber": {
+                    "value": {
+                      "error": {
+                        "code": "missing_ticket_number",
+                        "message": "Поле ticket_number обязательно."
+                      }
+                    }
+                  },
+                  "invalidCallbackUrl": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_callback_url",
+                        "message": "callback_url не соответствует политике безопасности.",
+                        "reason": "credentials_not_allowed"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid webhook token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook/provider/channel-repair/monitor": {
+      "post": {
+        "operationId": "monitorProviderChannelRepair",
+        "tags": [
+          "runbooks",
+          "cmdbuild",
+          "email",
+          "zabbix"
+        ],
+        "summary": "Send a provider channel repair email and monitor Zabbix/email completion",
+        "description": "Async-only composite runbook. It resolves provider email context from CMDBuild by host, sends the provider_channel_outage_test templated email, then polls Zabbix first and provider mailbox index second until Zabbix is ok/resolved, a provider reply is found, delivery fails, or timeout expires. The HTTP response is accepted; terminal business result is delivered as canonical ServiceDesk ExternalEvent.result.",
+        "x-result-delivery": {
+          "canonical_event": "ServiceDesk ExternalEvent",
+          "async_callback_path": "invocation.extensions.async_callback",
+          "result_schema": "#/components/schemas/MonitorProviderChannelRepairResult",
+          "supported_transports": [
+            "http_callback",
+            "kafka_event",
+            "both"
+          ],
+          "default_result_topic": "external.events"
+        },
+        "security": [
+          {
+            "ServiceDeskWebhookToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MonitorProviderChannelRepairRequest"
+              },
+              "examples": {
+                "asyncMonitor": {
+                  "summary": "Async provider repair monitor",
+                  "value": {
+                    "host": "Router for NTbook group 000 (OFF01 Office 01 - Headquarters)",
+                    "problemUrl": "http://localhost:8081/tr_events.php?triggerid=61119&eventid=90528",
+                    "service_request": "12345678",
+                    "poll_interval_minutes": 15,
+                    "timeout_minutes": 60,
+                    "templateId": "provider_channel_outage_test",
+                    "invocation": {
+                      "invocation_id": "cmd-provider-monitor-123",
+                      "action_id": "monitor_provider_channel_repair",
+                      "extensions": {
+                        "async_callback": {
+                          "source": "n8n",
+                          "case_id": "case-000000000001",
+                          "wait_id": "wait-000000000001",
+                          "correlation_id": "case-000000000001:tool_command:cmd-provider-monitor-123",
+                          "event_type": "monitor_provider_channel_repair_completed",
+                          "idempotency_key_base": "case-000000000001:tool_command:cmd-provider-monitor-123",
+                          "result_transport": "kafka_event",
+                          "result_topic": "external.events"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Runbook accepted. Terminal result is delivered asynchronously.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MonitorProviderChannelRepairAcceptedResponse"
+                },
+                "examples": {
+                  "accepted": {
+                    "value": {
+                      "runbook_status": "accepted",
+                      "message": "n8n provider channel repair monitor принял запрос.",
+                      "invocation_id": "cmd-provider-monitor-123",
+                      "action_id": "monitor_provider_channel_repair",
+                      "accepted_at": "2026-06-13T10:00:00.000Z",
+                      "async_delivery": true,
+                      "correlation_id": "case-000000000001:tool_command:cmd-provider-monitor-123",
+                      "wait_id": "wait-000000000001",
+                      "result_transport": "kafka_event",
+                      "result_topic": "external.events",
+                      "has_callback_url": false
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "missingServiceRequest": {
+                    "value": {
+                      "error": {
+                        "code": "missing_service_request",
+                        "message": "Поле service_request обязательно."
+                      }
+                    }
+                  },
+                  "missingAsyncCallback": {
+                    "value": {
+                      "error": {
+                        "code": "missing_async_callback",
+                        "message": "Для этого ранбука обязателен invocation.extensions.async_callback."
+                      }
+                    }
+                  },
+                  "invalidCallbackUrl": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_callback_url",
+                        "message": "callback_url не соответствует политике безопасности.",
+                        "reason": "credentials_not_allowed"
+                      }
+                    }
+                  },
+                  "missingResultTopic": {
+                    "value": {
+                      "error": {
+                        "code": "missing_result_topic",
+                        "message": "result_topic обязателен для kafka_event или both."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid webhook token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook/cmdbuild/provider-email-context": {
+      "post": {
+        "operationId": "getProviderEmailContext",
+        "tags": [
+          "cmdbuild",
+          "runbooks"
+        ],
+        "summary": "Get provider email context from CMDBuild by router hostname",
+        "description": "Finds an active routerG card by exact Description/hostname and returns the fields required to render a provider email template. The workflow is read-only and does not send email.",
+        "security": [
+          {
+            "ServiceDeskWebhookToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetProviderEmailContextRequest"
+              },
+              "examples": {
+                "routerByDescription": {
+                  "value": {
+                    "hostname": "Router for NTbook group 000 (OFF01 Office 01 - Headquarters)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Provider email context resolved from CMDBuild.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetProviderEmailContextResponse"
+                },
+                "examples": {
+                  "ok": {
+                    "value": {
+                      "status": "OK",
+                      "hostname": "Router for NTbook group 000 (OFF01 Office 01 - Headquarters)",
+                      "router_id": 1308541,
+                      "city": "City01",
+                      "location": "Office Building A - Floor 1 - Room 001",
+                      "ip_address": "192.168.202.35",
+                      "contract": "Договор № 33333-1111 и так далее",
+                      "provider_email": "provider@example.test"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "missingHostname": {
+                    "value": {
+                      "error": {
+                        "code": "missing_hostname",
+                        "message": "Поле hostname обязательно."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid webhook token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "routerG card was not found by exact Description.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "notFound": {
+                    "value": {
+                      "error": {
+                        "code": "router_not_found",
+                        "message": "routerG не найден по Description."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "More than one routerG card matched hostname.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Required CMDBuild field or reference field is empty.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "missingCmdbuildField": {
+                    "value": {
+                      "error": {
+                        "code": "missing_cmdbuild_field",
+                        "message": "В routerG не заполнены обязательные атрибуты.",
+                        "missing_fields": [
+                          "email"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "CMDBuild authentication or lookup failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "authFailed": {
+                    "value": {
+                      "error": {
+                        "code": "cmdbuild_auth_failed",
+                        "message": "CMDBuild authentication failed."
+                      }
+                    }
+                  },
+                  "lookupFailed": {
+                    "value": {
+                      "error": {
+                        "code": "cmdbuild_lookup_failed",
+                        "message": "CMDBuild reference lookup failed."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook/hr/verify-manager": {
+      "post": {
+        "operationId": "verifyEmployeeManager",
+        "tags": [
+          "runbooks",
+          "hr"
+        ],
+        "summary": "Verify an employee and claimed manager pair through HR export",
+        "description": "Validates an employee full name and a claimed manager full name against the HR export. Returns OK only when exactly one employee-manager pair is confirmed through the selected administrative, managerial, or both relation types and both employee and manager tabular numbers are available. Business-negative outcomes return HTTP 200 with status ERROR and all found/not found people details.",
+        "security": [
+          {
+            "ServiceDeskWebhookToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyEmployeeManagerRequest"
+              },
+              "examples": {
+                "managerialCheck": {
+                  "summary": "Managerial relation check",
+                  "value": {
+                    "employee_full_name": "Иванов Иван Иванович",
+                    "claimed_manager_full_name": "Петров Петр Петрович",
+                    "relation_type": "managerial"
+                  }
+                },
+                "defaultBothCheck": {
+                  "summary": "Default check across both HR structures",
+                  "value": {
+                    "employeeFullName": "Иванов Иван Иванович",
+                    "claimedManagerFullName": "Петров Петр Петрович"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "HR manager verification business result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyEmployeeManagerResponse"
+                },
+                "examples": {
+                  "ok": {
+                    "value": {
+                      "status": "OK",
+                      "message": "Проверка OK: Иванов Иван Иванович (ТН 1001) подчиняется Петров Петр Петрович (ТН 2001) по кадровой выгрузке.",
+                      "relation_type_requested": "both",
+                      "matched_relation_types": [
+                        "managerial"
+                      ],
+                      "employee": {
+                        "full_name": "Иванов Иван Иванович",
+                        "employee_gid": "employee-1",
+                        "employee_id": "1001",
+                        "employee_id_found": true,
+                        "person_gid": "person-1",
+                        "positions": []
+                      },
+                      "manager": {
+                        "full_name": "Петров Петр Петрович",
+                        "employee_gid": "employee-2",
+                        "employee_id": "2001",
+                        "employee_id_found": true,
+                        "person_gid": "person-2",
+                        "positions": []
+                      },
+                      "matched_pairs": [],
+                      "checked_pairs": [],
+                      "employee_id": "1001",
+                      "manager_id": "2001"
+                    }
+                  },
+                  "notUnique": {
+                    "value": {
+                      "status": "ERROR",
+                      "error_code": "employee_not_unique",
+                      "message": "По ФИО сотрудника найдено несколько активных сотрудников.",
+                      "relation_type_requested": "both",
+                      "employee_matches": [],
+                      "manager_matches": [],
+                      "checked_pairs": []
+                    }
+                  },
+                  "employeeIdNotFound": {
+                    "value": {
+                      "status": "ERROR",
+                      "error_code": "employee_id_not_found",
+                      "message": "Табельный номер сотрудника не найден в кадровой выгрузке.",
+                      "relation_type_requested": "both",
+                      "matched_relation_types": [
+                        "managerial"
+                      ],
+                      "employee": {
+                        "full_name": "Иванов Иван Иванович",
+                        "employee_gid": "employee-1",
+                        "employee_id": null,
+                        "employee_id_found": false,
+                        "person_gid": "person-1",
+                        "positions": []
+                      },
+                      "manager": {
+                        "full_name": "Петров Петр Петрович",
+                        "employee_gid": "employee-2",
+                        "employee_id": "2001",
+                        "employee_id_found": true,
+                        "person_gid": "person-2",
+                        "positions": []
+                      },
+                      "matched_pairs": [],
+                      "checked_pairs": []
+                    }
+                  },
+                  "managerIdNotFound": {
+                    "value": {
+                      "status": "ERROR",
+                      "error_code": "manager_id_not_found",
+                      "message": "Табельный номер руководителя не найден в кадровой выгрузке.",
+                      "relation_type_requested": "both",
+                      "matched_relation_types": [
+                        "managerial"
+                      ],
+                      "employee": {
+                        "full_name": "Иванов Иван Иванович",
+                        "employee_gid": "employee-1",
+                        "employee_id": "1001",
+                        "employee_id_found": true,
+                        "person_gid": "person-1",
+                        "positions": []
+                      },
+                      "manager": {
+                        "full_name": "Петров Петр Петрович",
+                        "employee_gid": "employee-2",
+                        "employee_id": null,
+                        "employee_id_found": false,
+                        "person_gid": "person-2",
+                        "positions": []
+                      },
+                      "matched_pairs": [],
+                      "checked_pairs": []
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid webhook token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "HR API lookup failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook/hr/verify-applicant-participant": {
+      "post": {
+        "operationId": "verifyApplicantParticipant",
+        "tags": [
+          "runbooks",
+          "hr"
+        ],
+        "summary": "Verify that the applicant is the employee or manager",
+        "description": "Read-only string check for three full names. The workflow validates applicant, employee and manager full names, normalizes whitespace and case, and returns OK only when the applicant matches either the employee or the manager. It does not call HR or AD.",
+        "security": [
+          {
+            "ServiceDeskWebhookToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyApplicantParticipantRequest"
+              },
+              "examples": {
+                "applicantIsEmployee": {
+                  "summary": "Applicant is the employee",
+                  "value": {
+                    "applicant_full_name": "Иванов Иван Иванович",
+                    "employee_full_name": "Иванов Иван Иванович",
+                    "manager_full_name": "Петров Петр Петрович"
+                  }
+                },
+                "applicantIsManager": {
+                  "summary": "Applicant is the manager",
+                  "value": {
+                    "applicantFullName": "Петров Петр Петрович",
+                    "employeeFullName": "Иванов Иван Иванович",
+                    "managerFullName": "Петров Петр Петрович"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applicant participant verification business result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyApplicantParticipantResponse"
+                },
+                "examples": {
+                  "ok": {
+                    "value": {
+                      "status": "OK",
+                      "matched_role": "employee",
+                      "applicant_full_name": "Иванов Иван Иванович",
+                      "employee_full_name": "Иванов Иван Иванович",
+                      "manager_full_name": "Петров Петр Петрович"
+                    }
+                  },
+                  "notParticipant": {
+                    "value": {
+                      "status": "ERROR",
+                      "error_code": "applicant_not_participant",
+                      "message": "Заявитель не совпадает ни с сотрудником, ни с руководителем.",
+                      "applicant_full_name": "Сидоров Сидор Сидорович",
+                      "employee_full_name": "Иванов Иван Иванович",
+                      "manager_full_name": "Петров Петр Петрович"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid webhook token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook/ad/user/login-lookup": {
+      "post": {
+        "operationId": "lookupAdUserLogin",
+        "tags": [
+          "runbooks",
+          "ad"
+        ],
+        "summary": "Lookup an AD user login and email by full name and employee id",
+        "description": "Read-only MS AD lookup. Validates an employee full name and tabular number, searches AD through the configured n8n LDAP credential, and returns OK only when exactly one AD user is found and the selected login and email attributes are not empty. Attribute names are caller-configurable with safe defaults.",
+        "security": [
+          {
+            "ServiceDeskWebhookToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LookupAdUserLoginRequest"
+              },
+              "examples": {
+                "defaultAttributes": {
+                  "summary": "Lookup with default AD attributes",
+                  "value": {
+                    "full_name": "Иванов Иван Иванович",
+                    "employee_id": "1001"
+                  }
+                },
+                "customAttributes": {
+                  "summary": "Lookup with explicit AD attribute names",
+                  "value": {
+                    "fullName": "Иванов Иван Иванович",
+                    "employeeId": "1001",
+                    "full_name_attribute": "displayName",
+                    "employee_id_attribute": "employeeID",
+                    "login_attribute": "sAMAccountName",
+                    "base_dn": "OU=Users,DC=example,DC=local",
+                    "email_attribute": "mail"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "AD login and email lookup business result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LookupAdUserLoginResponse"
+                },
+                "examples": {
+                  "ok": {
+                    "value": {
+                      "status": "OK",
+                      "login": "iivanov",
+                      "full_name": "Иванов Иван Иванович",
+                      "employee_id": "1001",
+                      "matched_by": {
+                        "full_name_attribute": "displayName",
+                        "employee_id_attribute": "employeeID",
+                        "login_attribute": "sAMAccountName",
+                        "email_attribute": "mail"
+                      },
+                      "email": "iivanov@example.ru"
+                    }
+                  },
+                  "notFound": {
+                    "value": {
+                      "status": "ERROR",
+                      "error_code": "ad_user_not_found",
+                      "message": "Пользователь AD не найден по ФИО и табельному номеру.",
+                      "full_name": "Иванов Иван Иванович",
+                      "employee_id": "1001",
+                      "match_count": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "invalidAttribute": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_ad_attribute",
+                        "message": "Имя AD атрибута содержит недопустимые символы."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid webhook token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "AD lookup workflow is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "missingBaseDn": {
+                    "value": {
+                      "error": {
+                        "code": "missing_ad_base_dn",
+                        "message": "AD_BASE_DN или поле base_dn обязательно для поиска в AD."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "LDAP/AD lookup failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "lookupFailed": {
+                    "value": {
+                      "error": {
+                        "code": "ad_lookup_failed",
+                        "message": "LDAP/AD lookup failed."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook/ad/user/reset-password": {
+      "post": {
+        "operationId": "resetAdUserPassword",
+        "tags": [
+          "runbooks",
+          "ad"
+        ],
+        "summary": "Reset an AD user password and require change on first login",
+        "description": "Internal-only endpoint used by processAdPasswordResetRequest to change an AD user password after approval and HR/AD checks. External clients should call /webhook/ad/password-reset/process instead.",
+        "security": [
+          {
+            "ServiceDeskWebhookToken": []
+          },
+          {
+            "ServiceDeskInternalRunbookToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetAdUserPasswordRequest"
+              },
+              "examples": {
+                "defaultPolicy": {
+                  "summary": "Reset password with default policy",
+                  "value": {
+                    "login": "iivanov",
+                    "password_length": 12
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "AD password reset business result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResetAdUserPasswordResponse"
+                },
+                "examples": {
+                  "ok": {
+                    "value": {
+                      "status": "OK",
+                      "login": "iivanov",
+                      "password": "<generated-password>",
+                      "password_length": 12,
+                      "change_on_first_login": true,
+                      "matched_by": {
+                        "login_attribute": "sAMAccountName"
+                      }
+                    }
+                  },
+                  "notFound": {
+                    "value": {
+                      "status": "ERROR",
+                      "error_code": "ad_user_not_found",
+                      "message": "Пользователь AD не найден по login.",
+                      "login": "iivanov",
+                      "match_count": 0
+                    }
+                  },
+                  "updateFailed": {
+                    "value": {
+                      "status": "ERROR",
+                      "error_code": "ad_password_update_unconfirmed",
+                      "message": "LDAP node не подтвердил смену пароля пользователя AD.",
+                      "login": "iivanov",
+                      "reason": "[redacted]"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "invalidPasswordLength": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_password_length",
+                        "message": "password_length должен быть целым числом от 8 до 128."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid webhook token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Missing or invalid internal runbook token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "forbiddenInternalToken": {
+                    "value": {
+                      "error": {
+                        "code": "forbidden_internal_runbook_token",
+                        "message": "Внутренний токен ранбука отсутствует или некорректен."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "AD password reset workflow is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "missingBaseDn": {
+                    "value": {
+                      "error": {
+                        "code": "missing_ad_base_dn",
+                        "message": "AD_BASE_DN или поле base_dn обязательно для поиска в AD."
+                      }
+                    }
+                  },
+                  "missingInternalRunbookToken": {
+                    "value": {
+                      "error": {
+                        "code": "missing_internal_runbook_token",
+                        "message": "N8N_INTERNAL_RUNBOOK_TOKEN обязателен для AD password reset endpoint."
+                      }
+                    }
+                  },
+                  "invalidAllowedCharsConfig": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_allowed_chars_config",
+                        "message": "AD_PASSWORD_ALLOWED_CHARS должен содержать минимум 2 уникальных символа, не содержать управляющие символы и быть не длиннее 512 символов."
+                      }
+                    }
+                  },
+                  "invalidAdAttributeConfig": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_ad_attribute_config",
+                        "message": "Имя AD атрибута содержит недопустимые символы."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhook/ad/password-reset/process": {
+      "post": {
+        "operationId": "processAdPasswordResetRequest",
+        "tags": [
+          "runbooks",
+          "ad",
+          "hr",
+          "email"
+        ],
+        "summary": "Process an AD password reset ServiceDesk request",
+        "description": "Composite mutating runbook. Validates that the applicant is the employee or manager, verifies the claimed manager through HR data, looks up employee and manager in AD, resets the employee password, sends the generated password to the manager with the password reset notification template, and returns all completed step results without the generated password.",
+        "security": [
+          {
+            "ServiceDeskWebhookToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProcessAdPasswordResetRequest"
+              },
+              "examples": {
+                "default": {
+                  "summary": "Password reset request processing",
+                  "value": {
+                    "service_request": "12345678",
+                    "applicant_full_name": "Петров Петр Петрович",
+                    "employee_full_name": "Иванов Иван Иванович",
+                    "claimed_manager_full_name": "Петров Петр Петрович",
+                    "approval_id": "approval-123",
+                    "approved_by": "service-desk-supervisor",
+                    "idempotency_key": "case-123:password-reset"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Composite password reset processing result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProcessAdPasswordResetResponse"
+                },
+                "examples": {
+                  "ok": {
+                    "value": {
+                      "status": "OK",
+                      "service_request": "12345678",
+                      "password_changed": true,
+                      "notification_sent": true,
+                      "steps": {
+                        "applicant_participant": {
+                          "status": "OK",
+                          "matched_role": "manager"
+                        },
+                        "manager_verification": {
+                          "status": "OK",
+                          "employee_id": "1001",
+                          "manager_id": "2001"
+                        },
+                        "employee_ad_lookup": {
+                          "status": "OK",
+                          "login": "iivanov",
+                          "email": "iivanov@example.ru"
+                        },
+                        "manager_ad_lookup": {
+                          "status": "OK",
+                          "login": "ppetrov",
+                          "email": "ppetrov@example.ru"
+                        },
+                        "password_reset": {
+                          "status": "OK",
+                          "login": "iivanov",
+                          "password_length": 12,
+                          "change_on_first_login": true
+                        },
+                        "notification": {
+                          "status": "sent",
+                          "to": "ppetrov@example.ru",
+                          "templateId": "ad_password_reset_notification"
+                        }
+                      },
+                      "approval_id": "approval-123",
+                      "approved_by": "service-desk-supervisor",
+                      "idempotency_key": "case-123:password-reset"
+                    }
+                  },
+                  "notificationFailed": {
+                    "value": {
+                      "status": "ERROR",
+                      "service_request": "12345678",
+                      "error_code": "notification_email_send_failed",
+                      "failed_step": "notification",
+                      "message": "Пароль изменен, но endpoint отправки письма не подтвердил отправку.",
+                      "password_changed": true,
+                      "notification_sent": false,
+                      "steps": {
+                        "password_reset": {
+                          "status": "OK",
+                          "login": "iivanov",
+                          "password_length": 12,
+                          "change_on_first_login": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request validation failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid webhook token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Composite workflow is not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -685,6 +2387,12 @@
         "in": "header",
         "name": "X-ServiceDesk-Token",
         "description": "Webhook token configured as N8N_WEBHOOK_TOKEN in the n8n runtime."
+      },
+      "ServiceDeskInternalRunbookToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-ServiceDesk-Internal-Token",
+        "description": "Internal n8n-to-n8n runbook token from N8N_INTERNAL_RUNBOOK_TOKEN. Required only for dangerous internal runbooks such as AD password reset."
       }
     },
     "schemas": {
@@ -793,6 +2501,11 @@
           },
           "description": {
             "type": "string"
+          },
+          "sensitive": {
+            "type": "boolean",
+            "default": false,
+            "description": "Marks a parameter whose value must not be logged or stored outside the approved business process."
           },
           "pattern": {
             "type": "string"
@@ -1152,7 +2865,18 @@
           "callback_url": {
             "type": "string",
             "format": "uri",
-            "description": "Required when result_transport is http_callback or both."
+            "description": "Required when result_transport is http_callback or both. The URL must use http or https, must not contain userinfo credentials, must match ORCHESTRATOR_PUBLIC_URL origin/path in non-local environments, and production environments require https except local/dev loopback or compose-host examples.",
+            "x-callback-url-policy": {
+              "credentials_allowed": false,
+              "production_requires_https": true,
+              "orchestrator_public_url_env": "ORCHESTRATOR_PUBLIC_URL",
+              "allowed_local_http_hosts": [
+                "localhost",
+                "127.0.0.1",
+                "::1",
+                "single-label compose hostnames"
+              ]
+            }
           },
           "result_transport": {
             "$ref": "#/components/schemas/RunbookResultTransport"
@@ -1297,6 +3021,9 @@
           "has_callback_url": {
             "type": "boolean",
             "description": "True when callback_url was provided without echoing the URL value."
+          },
+          "delivery_status": {
+            "$ref": "#/components/schemas/ExternalEventDeliveryStatus"
           }
         }
       },
@@ -1322,6 +3049,2183 @@
                 "type": "string"
               }
             }
+          }
+        }
+      },
+      "GetZabbixProblemStatusRequest": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "problemUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Full Zabbix UI problem URL containing triggerid and eventid query parameters. Only http/https URLs without embedded username/password are accepted. The workflow also accepts problem_url."
+          },
+          "problem_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Alias accepted by the workflow for problemUrl. Only http/https URLs without embedded username/password are accepted."
+          }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "problemUrl"
+            ]
+          },
+          {
+            "required": [
+              "problem_url"
+            ]
+          }
+        ],
+        "description": "Read-only request. The endpoint returns problem, resolved, or ok and does not mutate Zabbix."
+      },
+      "GetZabbixProblemStatusResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "eventid",
+          "triggerid",
+          "zabbix_origin",
+          "source",
+          "problem"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "problem",
+              "resolved",
+              "ok"
+            ],
+            "description": "problem means the original event or current trigger is in problem state; resolved means the original event has recovery evidence; ok means the original event is no longer available and current trigger value is OK."
+          },
+          "eventid": {
+            "type": "string"
+          },
+          "triggerid": {
+            "type": "string"
+          },
+          "zabbix_origin": {
+            "type": "string",
+            "format": "uri"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "event",
+              "trigger_fallback"
+            ],
+            "description": "event means status was determined from event.get; trigger_fallback means event was unavailable and status was determined from trigger.get."
+          },
+          "problem": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "severity": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "acknowledged": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "event_value": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "recovery_eventid": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "recovery_clock": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "trigger_value": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "WaitZabbixProblemStatusRequest": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "invocation"
+        ],
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "problemUrl"
+                ]
+              },
+              {
+                "required": [
+                  "problem_url"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "poll_interval_minutes"
+                ]
+              },
+              {
+                "required": [
+                  "pollIntervalMinutes"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "timeout_minutes"
+                ]
+              },
+              {
+                "required": [
+                  "timeoutMinutes"
+                ]
+              }
+            ]
+          }
+        ],
+        "properties": {
+          "problemUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Full Zabbix UI problem URL containing triggerid and eventid query parameters. The workflow also accepts problem_url."
+          },
+          "problem_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Alias accepted by the workflow for problemUrl."
+          },
+          "poll_interval_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60
+          },
+          "pollIntervalMinutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60,
+            "description": "Alias accepted by the workflow for poll_interval_minutes."
+          },
+          "timeout_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 240
+          },
+          "timeoutMinutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 240,
+            "description": "Alias accepted by the workflow for timeout_minutes."
+          },
+          "request_id": {
+            "type": "string",
+            "description": "Optional caller request identifier. The workflow also accepts requestId."
+          },
+          "requestId": {
+            "type": "string",
+            "description": "Optional caller request identifier alias."
+          },
+          "invocation": {
+            "$ref": "#/components/schemas/RunbookInvocation",
+            "description": "Async invocation package. action_id must be wait_zabbix_problem_status and invocation.extensions.async_callback is required."
+          }
+        },
+        "description": "Async-only read-only wait request. The endpoint does not mutate Zabbix."
+      },
+      "WaitZabbixProblemStatusAcceptedResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "runbook_status",
+          "message",
+          "async_delivery"
+        ],
+        "properties": {
+          "runbook_status": {
+            "const": "accepted"
+          },
+          "message": {
+            "type": "string"
+          },
+          "invocation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "action_id": {
+            "const": "wait_zabbix_problem_status"
+          },
+          "accepted_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "async_delivery": {
+            "const": true
+          },
+          "correlation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "wait_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result_transport": {
+            "$ref": "#/components/schemas/RunbookResultTransport"
+          },
+          "result_topic": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "has_callback_url": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WaitZabbixProblemStatusResultStatus": {
+        "enum": [
+          "ok",
+          "resolved",
+          "problem",
+          "ERROR"
+        ]
+      },
+      "WaitZabbixProblemStatusResult": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "timed_out",
+          "message",
+          "problemUrl",
+          "started_at",
+          "finished_at",
+          "poll_interval_minutes",
+          "timeout_minutes"
+        ],
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/WaitZabbixProblemStatusResultStatus"
+          },
+          "timed_out": {
+            "type": "boolean",
+            "description": "True only when timeout expired while Zabbix still reported problem."
+          },
+          "message": {
+            "type": "string"
+          },
+          "problemUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "zabbix_status": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/GetZabbixProblemStatusResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true,
+            "description": "Present when status is ERROR."
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finished_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "poll_interval_minutes": {
+            "type": "integer"
+          },
+          "timeout_minutes": {
+            "type": "integer"
+          },
+          "delivery_status": {
+            "$ref": "#/components/schemas/ExternalEventDeliveryStatus"
+          }
+        }
+      },
+      "WaitForEmailByTicketRequest": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "ticket_number",
+          "poll_interval_minutes",
+          "timeout_minutes"
+        ],
+        "properties": {
+          "ticket_number": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "description": "Ticket number text that must appear in email subject or body. The workflow also accepts ticketNumber."
+          },
+          "ticketNumber": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "description": "Alias accepted by the workflow for ticket_number."
+          },
+          "poll_interval_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60
+          },
+          "pollIntervalMinutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60,
+            "description": "Alias accepted by the workflow for poll_interval_minutes."
+          },
+          "timeout_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 240,
+            "description": "Direct mode is capped at 5 minutes; async mode supports longer waits."
+          },
+          "timeoutMinutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 240,
+            "description": "Alias accepted by the workflow for timeout_minutes."
+          },
+          "invocation": {
+            "$ref": "#/components/schemas/RunbookInvocation"
+          }
+        }
+      },
+      "WaitForEmailByTicketAcceptedResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "runbook_status",
+          "message",
+          "async_delivery"
+        ],
+        "properties": {
+          "runbook_status": {
+            "const": "accepted"
+          },
+          "message": {
+            "type": "string"
+          },
+          "invocation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "action_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "accepted_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "async_delivery": {
+            "const": true
+          },
+          "correlation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "wait_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result_transport": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RunbookResultTransport"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result_topic": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "has_callback_url": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WaitForEmailByTicketResultStatus": {
+        "enum": [
+          "OK",
+          "MULTI_MAIL",
+          "DELIVERY_FAILED",
+          "NOT_FOUND"
+        ]
+      },
+      "WaitForEmailByTicketResult": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "ticket_number",
+          "match_count",
+          "poll_interval_minutes",
+          "timeout_minutes",
+          "started_at",
+          "finished_at"
+        ],
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/WaitForEmailByTicketResultStatus"
+          },
+          "ticket_number": {
+            "type": "string"
+          },
+          "subject": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "body": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Plain text email body indexed by the collector. Very large bodies may be truncated."
+          },
+          "body_truncated": {
+            "type": "boolean"
+          },
+          "from": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "received_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "message_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "mailbox": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "is_delivery_failure": {
+            "type": "boolean"
+          },
+          "delivery_failure_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "match_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "delivery_failure_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "poll_interval_minutes": {
+            "type": "integer"
+          },
+          "timeout_minutes": {
+            "type": "integer"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finished_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "delivery_status": {
+            "$ref": "#/components/schemas/ExternalEventDeliveryStatus"
+          }
+        }
+      },
+      "MonitorProviderChannelRepairRequest": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "invocation"
+        ],
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "host"
+                ]
+              },
+              {
+                "required": [
+                  "hostname"
+                ]
+              },
+              {
+                "required": [
+                  "hostName"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "problemUrl"
+                ]
+              },
+              {
+                "required": [
+                  "problem_url"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "service_request"
+                ]
+              },
+              {
+                "required": [
+                  "serviceRequest"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "poll_interval_minutes"
+                ]
+              },
+              {
+                "required": [
+                  "pollIntervalMinutes"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "timeout_minutes"
+                ]
+              },
+              {
+                "required": [
+                  "timeoutMinutes"
+                ]
+              }
+            ]
+          }
+        ],
+        "properties": {
+          "host": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Exact routerG Description value used by CMDBuild provider context lookup. The workflow also accepts hostname and hostName aliases."
+          },
+          "hostname": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Alias accepted by the workflow for host."
+          },
+          "hostName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Alias accepted by the workflow for host."
+          },
+          "problemUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Full Zabbix UI problem URL containing triggerid and eventid query parameters. The workflow also accepts problem_url."
+          },
+          "problem_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Alias accepted by the workflow for problemUrl."
+          },
+          "service_request": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "description": "ServiceDesk request/order number inserted into the email template and used for provider reply correlation."
+          },
+          "serviceRequest": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "description": "Alias accepted by the workflow for service_request."
+          },
+          "poll_interval_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60
+          },
+          "pollIntervalMinutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60,
+            "description": "Alias accepted by the workflow for poll_interval_minutes."
+          },
+          "timeout_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 240
+          },
+          "timeoutMinutes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 240,
+            "description": "Alias accepted by the workflow for timeout_minutes."
+          },
+          "templateId": {
+            "type": "string",
+            "minLength": 1,
+            "default": "provider_channel_outage_test",
+            "description": "Template identifier from the email template catalog. Default is provider_channel_outage_test."
+          },
+          "template_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Alias accepted by the workflow for templateId."
+          },
+          "cc": {
+            "$ref": "#/components/schemas/EmailAddressList"
+          },
+          "bcc": {
+            "$ref": "#/components/schemas/EmailAddressList"
+          },
+          "replyTo": {
+            "type": "string",
+            "format": "email"
+          },
+          "reply_to": {
+            "type": "string",
+            "format": "email",
+            "description": "Alias accepted by the workflow for replyTo."
+          },
+          "request_id": {
+            "type": "string",
+            "description": "Optional caller request identifier. The workflow also accepts requestId."
+          },
+          "requestId": {
+            "type": "string",
+            "description": "Optional caller request identifier alias."
+          },
+          "invocation": {
+            "$ref": "#/components/schemas/RunbookInvocation",
+            "description": "Async invocation package. action_id must be monitor_provider_channel_repair and invocation.extensions.async_callback is required."
+          }
+        },
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "attachment"
+              ]
+            },
+            {
+              "required": [
+                "attachments"
+              ]
+            },
+            {
+              "required": [
+                "files"
+              ]
+            }
+          ]
+        }
+      },
+      "MonitorProviderChannelRepairAcceptedResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "runbook_status",
+          "message",
+          "async_delivery"
+        ],
+        "properties": {
+          "runbook_status": {
+            "const": "accepted"
+          },
+          "message": {
+            "type": "string"
+          },
+          "invocation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "action_id": {
+            "const": "monitor_provider_channel_repair"
+          },
+          "accepted_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "async_delivery": {
+            "const": true
+          },
+          "correlation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "wait_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "result_transport": {
+            "$ref": "#/components/schemas/RunbookResultTransport"
+          },
+          "result_topic": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "has_callback_url": {
+            "type": "boolean"
+          }
+        }
+      },
+      "MonitorProviderChannelRepairResultStatus": {
+        "enum": [
+          "RESOLVED",
+          "OK",
+          "MULTI_MAIL",
+          "DELIVERY_FAILED",
+          "NOT_FOUND",
+          "ERROR"
+        ]
+      },
+      "MonitorProviderChannelRepairResult": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "runbook_status",
+          "message",
+          "host",
+          "problemUrl",
+          "service_request",
+          "started_at",
+          "finished_at",
+          "poll_interval_minutes",
+          "timeout_minutes"
+        ],
+        "properties": {
+          "runbook_status": {
+            "$ref": "#/components/schemas/MonitorProviderChannelRepairResultStatus"
+          },
+          "message": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          },
+          "problemUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "service_request": {
+            "type": "string"
+          },
+          "provider_email_context": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/GetProviderEmailContextResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "email_dispatch": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true,
+            "description": "Normalized sendTemplatedEmail dispatch summary. Provider address may be present in workflow state but should not be logged with secrets."
+          },
+          "zabbix_status": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/GetZabbixProblemStatusResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "email_result": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/WaitForEmailByTicketResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Present only when runbook_status is ERROR or DELIVERY_FAILED."
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finished_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "poll_interval_minutes": {
+            "type": "integer"
+          },
+          "timeout_minutes": {
+            "type": "integer"
+          },
+          "delivery_status": {
+            "$ref": "#/components/schemas/ExternalEventDeliveryStatus"
+          }
+        }
+      },
+      "GetProviderEmailContextRequest": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "hostname"
+        ],
+        "properties": {
+          "hostname": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Exact routerG Description value. The workflow also accepts hostName."
+          },
+          "hostName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Alias accepted by the workflow for hostname."
+          }
+        }
+      },
+      "GetProviderEmailContextResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "hostname",
+          "router_id",
+          "city",
+          "location",
+          "ip_address",
+          "contract",
+          "provider_email"
+        ],
+        "properties": {
+          "status": {
+            "const": "OK"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "router_id": {
+            "type": "integer"
+          },
+          "city": {
+            "type": "string",
+            "description": "Building.City resolved through routerG.Location -> Room.Floor -> Floor.Building."
+          },
+          "location": {
+            "type": "string",
+            "description": "Room.Description resolved from routerG.Location."
+          },
+          "ip_address": {
+            "type": "string",
+            "description": "IpAddress.Description resolved from routerG.ipaddress."
+          },
+          "contract": {
+            "type": "string",
+            "description": "routerG.contract."
+          },
+          "provider_email": {
+            "type": "string",
+            "format": "email",
+            "description": "routerG.email."
+          }
+        }
+      },
+      "VerifyEmployeeManagerRequest": {
+        "type": "object",
+        "additionalProperties": true,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "employee_full_name"
+                ]
+              },
+              {
+                "required": [
+                  "employeeFullName"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "claimed_manager_full_name"
+                ]
+              },
+              {
+                "required": [
+                  "claimedManagerFullName"
+                ]
+              }
+            ]
+          }
+        ],
+        "properties": {
+          "employee_full_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Employee full name in Last First Middle order. The workflow also accepts employeeFullName."
+          },
+          "employeeFullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Alias accepted by the workflow for employee_full_name."
+          },
+          "claimed_manager_full_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Claimed manager full name in Last First Middle order. The workflow also accepts claimedManagerFullName."
+          },
+          "claimedManagerFullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Alias accepted by the workflow for claimed_manager_full_name."
+          },
+          "relation_type": {
+            "type": "string",
+            "enum": [
+              "administrative",
+              "managerial",
+              "both"
+            ],
+            "default": "both",
+            "description": "Which HR relation to verify: administrative, managerial, or both."
+          },
+          "relationType": {
+            "type": "string",
+            "enum": [
+              "administrative",
+              "managerial",
+              "both"
+            ],
+            "description": "Alias accepted by the workflow for relation_type."
+          },
+          "legal_entities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional HR LegalEntity ids to restrict the HR export requests. The workflow also accepts legalEntities."
+          },
+          "legalEntities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Alias accepted by the workflow for legal_entities."
+          }
+        }
+      },
+      "VerifyEmployeeManagerPosition": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "legal_entity": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "position_gid": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "position_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "org_unit_gid": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "org_unit_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "org_unit_managerial_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "VerifyEmployeeManagerPerson": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "full_name",
+          "employee_id_found"
+        ],
+        "properties": {
+          "full_name": {
+            "type": "string"
+          },
+          "employee_gid": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "employee_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "EmployeeID / табельный номер, if it is available from HR API projections. For the verified employee and verified manager it is mandatory for OK."
+          },
+          "employee_id_found": {
+            "type": "boolean",
+            "description": "False means the HR responses did not expose the tabular number. For the verified employee or verified manager this is a business ERROR."
+          },
+          "person_gid": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "positions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VerifyEmployeeManagerPosition"
+            }
+          }
+        }
+      },
+      "VerifyEmployeeManagerCheckedPair": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "relation_type": {
+            "type": "string",
+            "enum": [
+              "administrative",
+              "managerial"
+            ]
+          },
+          "employee_position_gid": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "employee_position_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "manager_position_gid": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "org_unit_gid": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "actual_managers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VerifyEmployeeManagerPerson"
+            }
+          }
+        }
+      },
+      "VerifyEmployeeManagerMatchedPair": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "relation_type": {
+            "type": "string",
+            "enum": [
+              "administrative",
+              "managerial"
+            ]
+          },
+          "employee_position_gid": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "employee_position_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "manager_position_gid": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "org_unit_gid": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "VerifyEmployeeManagerResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "message"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "OK",
+              "ERROR"
+            ]
+          },
+          "error_code": {
+            "type": "string",
+            "description": "Present when status is ERROR."
+          },
+          "message": {
+            "type": "string"
+          },
+          "relation_type_requested": {
+            "type": "string",
+            "enum": [
+              "administrative",
+              "managerial",
+              "both"
+            ]
+          },
+          "matched_relation_types": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "administrative",
+                "managerial"
+              ]
+            }
+          },
+          "employee": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/VerifyEmployeeManagerPerson"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "manager": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/VerifyEmployeeManagerPerson"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "employee_matches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VerifyEmployeeManagerPerson"
+            }
+          },
+          "manager_matches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VerifyEmployeeManagerPerson"
+            }
+          },
+          "matched_pairs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VerifyEmployeeManagerMatchedPair"
+            }
+          },
+          "checked_pairs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VerifyEmployeeManagerCheckedPair"
+            }
+          },
+          "employee_id": {
+            "type": "string",
+            "description": "Top-level EmployeeID / табельный номер сотрудника. Present when status is OK; missing employee tabular number is returned as status ERROR with error_code employee_id_not_found."
+          },
+          "manager_id": {
+            "type": "string",
+            "description": "Top-level EmployeeID / табельный номер руководителя. Present when status is OK; missing manager tabular number is returned as status ERROR with error_code manager_id_not_found."
+          }
+        }
+      },
+      "VerifyApplicantParticipantRequest": {
+        "type": "object",
+        "additionalProperties": true,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "applicant_full_name"
+                ]
+              },
+              {
+                "required": [
+                  "applicantFullName"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "employee_full_name"
+                ]
+              },
+              {
+                "required": [
+                  "employeeFullName"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "manager_full_name"
+                ]
+              },
+              {
+                "required": [
+                  "managerFullName"
+                ]
+              }
+            ]
+          }
+        ],
+        "properties": {
+          "applicant_full_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Applicant full name. The workflow also accepts applicantFullName."
+          },
+          "applicantFullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Alias accepted by the workflow for applicant_full_name."
+          },
+          "employee_full_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Employee full name. The workflow also accepts employeeFullName."
+          },
+          "employeeFullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Alias accepted by the workflow for employee_full_name."
+          },
+          "manager_full_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Manager full name. The workflow also accepts managerFullName."
+          },
+          "managerFullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Alias accepted by the workflow for manager_full_name."
+          }
+        }
+      },
+      "VerifyApplicantParticipantResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "OK",
+              "ERROR"
+            ]
+          },
+          "matched_role": {
+            "type": "string",
+            "enum": [
+              "employee",
+              "manager",
+              "both"
+            ],
+            "description": "Which input participant matched the applicant. Present when status is OK."
+          },
+          "error_code": {
+            "type": "string",
+            "enum": [
+              "applicant_not_participant"
+            ],
+            "description": "Business error code when status is ERROR."
+          },
+          "message": {
+            "type": "string"
+          },
+          "applicant_full_name": {
+            "type": "string"
+          },
+          "employee_full_name": {
+            "type": "string"
+          },
+          "manager_full_name": {
+            "type": "string"
+          }
+        }
+      },
+      "LookupAdUserLoginRequest": {
+        "type": "object",
+        "additionalProperties": true,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "full_name"
+                ]
+              },
+              {
+                "required": [
+                  "fullName"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "employee_id"
+                ]
+              },
+              {
+                "required": [
+                  "employeeId"
+                ]
+              }
+            ]
+          }
+        ],
+        "properties": {
+          "full_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Employee full name used for exact AD lookup. The workflow also accepts fullName."
+          },
+          "fullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Alias accepted by the workflow for full_name."
+          },
+          "employee_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Employee tabular number used for exact AD lookup. The workflow also accepts employeeId."
+          },
+          "employeeId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "Alias accepted by the workflow for employee_id."
+          },
+          "full_name_attribute": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9.-]*$",
+            "default": "displayName",
+            "description": "AD attribute used for full-name matching. The workflow also accepts fullNameAttribute."
+          },
+          "fullNameAttribute": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9.-]*$",
+            "description": "Alias accepted by the workflow for full_name_attribute."
+          },
+          "employee_id_attribute": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9.-]*$",
+            "default": "employeeID",
+            "description": "AD attribute used for employee-id matching. The workflow also accepts employeeIdAttribute."
+          },
+          "employeeIdAttribute": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9.-]*$",
+            "description": "Alias accepted by the workflow for employee_id_attribute."
+          },
+          "login_attribute": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9.-]*$",
+            "default": "sAMAccountName",
+            "description": "AD attribute returned as login. The workflow also accepts loginAttribute."
+          },
+          "loginAttribute": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9.-]*$",
+            "description": "Alias accepted by the workflow for login_attribute."
+          },
+          "base_dn": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "Optional LDAP Base DN override. When omitted, workflow uses AD_BASE_DN from n8n runtime."
+          },
+          "baseDN": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "Alias accepted by the workflow for base_dn."
+          },
+          "email_attribute": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9.-]*$",
+            "default": "mail",
+            "description": "AD attribute returned as email. The workflow also accepts emailAttribute."
+          },
+          "emailAttribute": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9.-]*$",
+            "description": "Alias accepted by the workflow for email_attribute."
+          }
+        }
+      },
+      "LookupAdUserLoginMatchedBy": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "full_name_attribute",
+          "employee_id_attribute",
+          "login_attribute",
+          "email_attribute"
+        ],
+        "properties": {
+          "full_name_attribute": {
+            "type": "string"
+          },
+          "employee_id_attribute": {
+            "type": "string"
+          },
+          "login_attribute": {
+            "type": "string"
+          },
+          "email_attribute": {
+            "type": "string"
+          }
+        }
+      },
+      "LookupAdUserLoginCandidate": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "login": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "full_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "employee_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "LookupAdUserLoginResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "OK",
+              "ERROR"
+            ]
+          },
+          "login": {
+            "type": "string",
+            "description": "Login value from the configured login_attribute. Present when status is OK."
+          },
+          "error_code": {
+            "type": "string",
+            "enum": [
+              "ad_user_not_found",
+              "ad_user_not_unique",
+              "ad_login_not_found",
+              "ad_email_not_found"
+            ],
+            "description": "Business error code when status is ERROR."
+          },
+          "message": {
+            "type": "string"
+          },
+          "full_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "employee_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "matched_by": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LookupAdUserLoginMatchedBy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "match_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LookupAdUserLoginCandidate"
+            }
+          },
+          "email": {
+            "type": "string",
+            "description": "Email value from the configured email_attribute. Present when status is OK."
+          }
+        }
+      },
+      "ResetAdUserPasswordRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "login"
+                ]
+              }
+            ]
+          }
+        ],
+        "properties": {
+          "login": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "AD login value used for exact lookup. Lookup attribute is configured by AD_PASSWORD_RESET_LOGIN_ATTRIBUTE or AD_LOGIN_ATTRIBUTE."
+          },
+          "password_length": {
+            "type": "integer",
+            "minimum": 8,
+            "maximum": 128,
+            "default": 12,
+            "description": "Generated password length. The workflow also accepts passwordLength."
+          },
+          "passwordLength": {
+            "type": "integer",
+            "minimum": 8,
+            "maximum": 128,
+            "description": "Alias accepted by the workflow for password_length."
+          }
+        }
+      },
+      "ResetAdUserPasswordMatchedBy": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "login_attribute"
+        ],
+        "properties": {
+          "login_attribute": {
+            "type": "string"
+          }
+        }
+      },
+      "ResetAdUserPasswordResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "OK",
+              "ERROR"
+            ]
+          },
+          "login": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "password": {
+            "type": "string",
+            "description": "Generated password. Present when status is OK. Treat as secret and do not log."
+          },
+          "password_length": {
+            "type": "integer"
+          },
+          "change_on_first_login": {
+            "type": "boolean"
+          },
+          "matched_by": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ResetAdUserPasswordMatchedBy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error_code": {
+            "type": "string",
+            "enum": [
+              "ad_user_lookup_failed",
+              "ad_user_not_found",
+              "ad_user_not_unique",
+              "ad_user_dn_not_found",
+              "ad_password_update_failed",
+              "ad_password_update_unconfirmed"
+            ],
+            "description": "Business error code. ad_password_update_unconfirmed means LDAP update did not return an explicit success marker, so the generated password must not be treated as applied."
+          },
+          "message": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "match_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "ProcessAdPasswordResetRequest": {
+        "type": "object",
+        "additionalProperties": true,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "service_request"
+                ]
+              },
+              {
+                "required": [
+                  "serviceRequest"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "applicant_full_name"
+                ]
+              },
+              {
+                "required": [
+                  "applicantFullName"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "employee_full_name"
+                ]
+              },
+              {
+                "required": [
+                  "employeeFullName"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "claimed_manager_full_name"
+                ]
+              },
+              {
+                "required": [
+                  "claimedManagerFullName"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "approval_id"
+                ]
+              },
+              {
+                "required": [
+                  "approvalId"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "approved_by"
+                ]
+              },
+              {
+                "required": [
+                  "approvedBy"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "idempotency_key"
+                ]
+              },
+              {
+                "required": [
+                  "idempotencyKey"
+                ]
+              }
+            ]
+          }
+        ],
+        "properties": {
+          "service_request": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "description": "ServiceDesk request number. The workflow also accepts serviceRequest."
+          },
+          "serviceRequest": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "description": "Alias accepted by the workflow for service_request."
+          },
+          "applicant_full_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Applicant full name. The workflow also accepts applicantFullName."
+          },
+          "applicantFullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Alias accepted by the workflow for applicant_full_name."
+          },
+          "employee_full_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Employee full name. The workflow also accepts employeeFullName."
+          },
+          "employeeFullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Alias accepted by the workflow for employee_full_name."
+          },
+          "claimed_manager_full_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Claimed manager full name. The workflow also accepts claimedManagerFullName."
+          },
+          "claimedManagerFullName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Alias accepted by the workflow for claimed_manager_full_name."
+          },
+          "approval_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "description": "Approval identifier from the upstream ServiceDesk approval policy."
+          },
+          "approvalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "description": "Alias accepted by the workflow for approval_id."
+          },
+          "approved_by": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "Approver identity from the upstream ServiceDesk approval policy."
+          },
+          "approvedBy": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "Alias accepted by the workflow for approved_by."
+          },
+          "idempotency_key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "Caller-generated idempotency key for this approved password reset request. The workflow propagates it to internal steps."
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "Alias accepted by the workflow for idempotency_key."
+          }
+        }
+      },
+      "ProcessAdPasswordResetStepResults": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "applicant_participant": {
+            "$ref": "#/components/schemas/VerifyApplicantParticipantResponse"
+          },
+          "manager_verification": {
+            "$ref": "#/components/schemas/VerifyEmployeeManagerResponse"
+          },
+          "employee_ad_lookup": {
+            "$ref": "#/components/schemas/LookupAdUserLoginResponse"
+          },
+          "manager_ad_lookup": {
+            "$ref": "#/components/schemas/LookupAdUserLoginResponse"
+          },
+          "password_reset": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Sanitized ResetAdUserPasswordResponse without the generated password field."
+          },
+          "notification": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "status": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "to": {
+                "type": "string",
+                "format": "email"
+              },
+              "templateId": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "ProcessAdPasswordResetResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "service_request",
+          "password_changed",
+          "notification_sent",
+          "steps"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "OK",
+              "ERROR"
+            ]
+          },
+          "service_request": {
+            "type": "string"
+          },
+          "password_changed": {
+            "type": "boolean"
+          },
+          "notification_sent": {
+            "type": "boolean"
+          },
+          "error_code": {
+            "type": "string",
+            "description": "Present when status is ERROR."
+          },
+          "failed_step": {
+            "type": "string",
+            "enum": [
+              "applicant_participant",
+              "manager_verification",
+              "employee_ad_lookup",
+              "manager_ad_lookup",
+              "password_reset",
+              "notification"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "steps": {
+            "$ref": "#/components/schemas/ProcessAdPasswordResetStepResults"
+          },
+          "approval_id": {
+            "type": "string",
+            "description": "Approval identifier accepted by the process workflow."
+          },
+          "approved_by": {
+            "type": "string",
+            "description": "Approver identity accepted by the process workflow."
+          },
+          "idempotency_key": {
+            "type": "string",
+            "description": "Caller-generated idempotency key propagated to internal workflow calls."
+          }
+        },
+        "not": {
+          "required": [
+            "password"
+          ]
+        }
+      },
+      "ExternalEventDeliveryStatus": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "requested_transport": {
+            "type": "string",
+            "enum": [
+              "http_callback",
+              "kafka_event",
+              "both"
+            ],
+            "description": "Requested terminal result delivery transport."
+          },
+          "http_callback": {
+            "type": "string",
+            "enum": [
+              "not_requested",
+              "pending",
+              "sent",
+              "failed"
+            ],
+            "description": "HTTP callback delivery status."
+          },
+          "http_callback_error": {
+            "type": "string",
+            "description": "Machine-readable callback failure code when http_callback is failed."
+          },
+          "kafka_event": {
+            "type": "string",
+            "enum": [
+              "not_requested",
+              "pending",
+              "published",
+              "failed"
+            ],
+            "description": "Kafka event delivery status."
           }
         }
       }

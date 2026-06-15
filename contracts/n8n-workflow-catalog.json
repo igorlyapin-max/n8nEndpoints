@@ -21,6 +21,28 @@
         ],
         "default_transport": "kafka_event",
         "default_result_topic": "external.events",
+        "transport_security": {
+          "http_callback": {
+            "policy": "admin_configured",
+            "recommended_production_scheme": "https",
+            "callback_url_source": "invocation.extensions.async_callback.callback_url",
+            "callback_base_url_env": "ORCHESTRATOR_PUBLIC_URL",
+            "token_header": "X-ServiceDesk-Callback-Token"
+          },
+          "kafka_event": {
+            "policy": "credential_configured",
+            "supported_security_protocols": [
+              "SASL_SSL",
+              "SSL"
+            ],
+            "supported_auth": [
+              "sasl",
+              "mtls"
+            ],
+            "credential_owner": "n8n",
+            "topic_source": "invocation.extensions.async_callback.result_topic"
+          }
+        },
         "current_stage4_behavior": "safe_stub_immediate_success"
       },
       "operations": [
@@ -69,6 +91,109 @@
         "execution_history_supported": false
       },
       "non_idempotent": true
+    },
+    {
+      "workflow_id": "zabbix_problem_status",
+      "display_name": "Статус Zabbix problem по URL",
+      "business_scenario": "zabbix_problem_status",
+      "endpoint_id": "n8n",
+      "callback_endpoint_id": "n8n",
+      "enabled": true,
+      "contract_url": "http://127.0.0.1:5678/webhook/contracts/openapi.json",
+      "execution_url": "http://127.0.0.1:5678/webhook/zabbix/problem/status",
+      "openapi_operation_id": "getZabbixProblemStatus",
+      "operations": [
+        "get_zabbix_problem_status"
+      ],
+      "read_only": true,
+      "status_values": [
+        "problem",
+        "resolved",
+        "ok"
+      ],
+      "management": {
+        "restart_supported": false,
+        "cancel_supported": false,
+        "execution_history_supported": false
+      }
+    },
+    {
+      "workflow_id": "zabbix_problem_wait",
+      "display_name": "Ожидание статуса Zabbix problem",
+      "business_scenario": "zabbix_problem_wait",
+      "endpoint_id": "n8n.zabbix.problem_wait",
+      "callback_endpoint_id": "n8n",
+      "enabled": true,
+      "read_only": true,
+      "contract_url": "http://127.0.0.1:5678/webhook/contracts/openapi.json",
+      "execution_url": "http://127.0.0.1:5678/webhook/zabbix/problem/wait",
+      "openapi_operation_id": "waitZabbixProblemStatus",
+      "workflow_export": "workflows/wait-zabbix-problem-status-webhook.json",
+      "operations": [
+        "wait_zabbix_problem_status"
+      ],
+      "async_supported": true,
+      "direct_supported": false,
+      "default_poll_interval_minutes": 15,
+      "default_timeout_minutes": 60,
+      "required_inputs": [
+        "problemUrl",
+        "poll_interval_minutes",
+        "timeout_minutes",
+        "invocation.extensions.async_callback"
+      ],
+      "status_values": [
+        "ok",
+        "resolved",
+        "problem",
+        "ERROR"
+      ],
+      "timeout_result": {
+        "status": "problem",
+        "timed_out": true
+      },
+      "result_delivery": {
+        "canonical_event": "ServiceDesk ExternalEvent",
+        "async_callback_path": "invocation.extensions.async_callback",
+        "supported_transports": [
+          "http_callback",
+          "kafka_event",
+          "both"
+        ],
+        "default_transport": "kafka_event",
+        "default_result_topic": "external.events",
+        "callback_token_header": "X-ServiceDesk-Callback-Token",
+        "transport_security": {
+          "http_callback": {
+            "policy": "admin_configured",
+            "recommended_production_scheme": "https",
+            "callback_url_source": "invocation.extensions.async_callback.callback_url",
+            "callback_base_url_env": "ORCHESTRATOR_PUBLIC_URL",
+            "token_header": "X-ServiceDesk-Callback-Token"
+          },
+          "kafka_event": {
+            "policy": "credential_configured",
+            "supported_security_protocols": [
+              "SASL_SSL",
+              "SSL"
+            ],
+            "supported_auth": [
+              "sasl",
+              "mtls"
+            ],
+            "credential_owner": "n8n",
+            "topic_source": "invocation.extensions.async_callback.result_topic"
+          }
+        }
+      },
+      "depends_on": [
+        "zabbix_problem_status"
+      ],
+      "management": {
+        "restart_supported": false,
+        "cancel_supported": false,
+        "execution_history_supported": false
+      }
     },
     {
       "workflow_id": "email_dispatch",
@@ -163,6 +288,552 @@
         "restart_supported": false,
         "cancel_supported": false,
         "execution_history_supported": false
+      }
+    },
+    {
+      "workflow_id": "email_mailbox_collector",
+      "display_name": "Индекс входящей почты",
+      "business_scenario": "email_mailbox_indexing",
+      "endpoint_id": "n8n.email.mailbox_collector",
+      "enabled": true,
+      "lifecycle": "internal_collector",
+      "external_callable": false,
+      "workflow_export": "workflows/email-ticket-mailbox-collector.json",
+      "operations": [
+        "index_incoming_email"
+      ],
+      "storage": {
+        "type": "postgres",
+        "table": "n8n_mail_index",
+        "retention_days": 7
+      },
+      "credentials": [
+        "IMAP",
+        "Postgres"
+      ]
+    },
+    {
+      "workflow_id": "email_wait_for_ticket",
+      "display_name": "Ожидание письма по номеру заявки",
+      "business_scenario": "provider_reply_wait",
+      "endpoint_id": "n8n.email.wait_for_ticket",
+      "enabled": true,
+      "contract_url": "http://127.0.0.1:5678/webhook/contracts/openapi.json",
+      "execution_url": "http://127.0.0.1:5678/webhook/email/wait-for-ticket",
+      "openapi_operation_id": "waitForEmailByTicket",
+      "workflow_export": "workflows/wait-for-email-ticket-webhook.json",
+      "operations": [
+        "wait_for_email_by_ticket"
+      ],
+      "async_supported": true,
+      "direct_timeout_limit_minutes": 5,
+      "async_timeout_limit_minutes": 240,
+      "default_poll_interval_minutes": 15,
+      "default_timeout_minutes": 60,
+      "search_window": "yesterday_and_today_by_runtime_timezone",
+      "status_values": [
+        "OK",
+        "MULTI_MAIL",
+        "DELIVERY_FAILED",
+        "NOT_FOUND"
+      ],
+      "result_delivery": {
+        "supported_transports": [
+          "http_callback",
+          "kafka_event",
+          "both"
+        ],
+        "default_result_topic": "external.events",
+        "callback_token_header": "X-ServiceDesk-Callback-Token",
+        "transport_security": {
+          "http_callback": {
+            "policy": "admin_configured",
+            "recommended_production_scheme": "https",
+            "callback_url_source": "invocation.extensions.async_callback.callback_url",
+            "callback_base_url_env": "ORCHESTRATOR_PUBLIC_URL",
+            "token_header": "X-ServiceDesk-Callback-Token"
+          },
+          "kafka_event": {
+            "policy": "credential_configured",
+            "supported_security_protocols": [
+              "SASL_SSL",
+              "SSL"
+            ],
+            "supported_auth": [
+              "sasl",
+              "mtls"
+            ],
+            "credential_owner": "n8n",
+            "topic_source": "invocation.extensions.async_callback.result_topic"
+          }
+        }
+      },
+      "depends_on": [
+        "email_mailbox_collector"
+      ]
+    },
+    {
+      "workflow_id": "provider_channel_repair_monitor",
+      "display_name": "Письмо провайдеру и мониторинг ремонта канала",
+      "business_scenario": "provider_channel_repair_monitor",
+      "endpoint_id": "n8n.provider.channel_repair_monitor",
+      "callback_endpoint_id": "n8n",
+      "enabled": true,
+      "contract_url": "http://127.0.0.1:5678/webhook/contracts/openapi.json",
+      "execution_url": "http://127.0.0.1:5678/webhook/provider/channel-repair/monitor",
+      "openapi_operation_id": "monitorProviderChannelRepair",
+      "workflow_export": "workflows/provider-channel-repair-monitor-webhook.json",
+      "operations": [
+        "monitor_provider_channel_repair"
+      ],
+      "async_supported": true,
+      "direct_supported": false,
+      "default_template_id": "provider_channel_outage_test",
+      "default_poll_interval_minutes": 15,
+      "default_timeout_minutes": 60,
+      "required_inputs": [
+        "host",
+        "problemUrl",
+        "service_request",
+        "poll_interval_minutes",
+        "timeout_minutes",
+        "invocation.extensions.async_callback"
+      ],
+      "status_values": [
+        "RESOLVED",
+        "OK",
+        "MULTI_MAIL",
+        "DELIVERY_FAILED",
+        "NOT_FOUND",
+        "ERROR"
+      ],
+      "result_delivery": {
+        "canonical_event": "ServiceDesk ExternalEvent",
+        "async_callback_path": "invocation.extensions.async_callback",
+        "supported_transports": [
+          "http_callback",
+          "kafka_event",
+          "both"
+        ],
+        "default_transport": "kafka_event",
+        "default_result_topic": "external.events",
+        "callback_token_header": "X-ServiceDesk-Callback-Token",
+        "transport_security": {
+          "http_callback": {
+            "policy": "admin_configured",
+            "recommended_production_scheme": "https",
+            "callback_url_source": "invocation.extensions.async_callback.callback_url",
+            "callback_base_url_env": "ORCHESTRATOR_PUBLIC_URL",
+            "token_header": "X-ServiceDesk-Callback-Token"
+          },
+          "kafka_event": {
+            "policy": "credential_configured",
+            "supported_security_protocols": [
+              "SASL_SSL",
+              "SSL"
+            ],
+            "supported_auth": [
+              "sasl",
+              "mtls"
+            ],
+            "credential_owner": "n8n",
+            "topic_source": "invocation.extensions.async_callback.result_topic"
+          }
+        }
+      },
+      "depends_on": [
+        "cmdbuild_provider_email_context",
+        "templated_email_dispatch",
+        "zabbix_problem_status",
+        "email_mailbox_collector"
+      ],
+      "management": {
+        "restart_supported": false,
+        "cancel_supported": false,
+        "execution_history_supported": false
+      }
+    },
+    {
+      "workflow_id": "cmdbuild_provider_email_context",
+      "display_name": "CMDBuild параметры письма провайдеру",
+      "business_scenario": "provider_email_context_lookup",
+      "endpoint_id": "n8n.cmdbuild.provider_email_context",
+      "callback_endpoint_id": "n8n",
+      "enabled": true,
+      "read_only": true,
+      "contract_url": "http://127.0.0.1:5678/webhook/contracts/openapi.json",
+      "execution_url": "http://127.0.0.1:5678/webhook/cmdbuild/provider-email-context",
+      "openapi_operation_id": "getProviderEmailContext",
+      "workflow_export": "workflows/cmdbuild-provider-email-context-webhook.json",
+      "operations": [
+        "get_provider_email_context"
+      ],
+      "source_system": "CMDBuild",
+      "cmdbuild": {
+        "base_url_env": "CMDBUILD_BASE_URL",
+        "class_name": "routerG",
+        "search_attribute": "Description",
+        "required_router_attributes": [
+          "email",
+          "contract",
+          "ipaddress",
+          "Location"
+        ],
+        "reference_chain": [
+          "routerG.ipaddress -> IpAddress.Description",
+          "routerG.Location -> Room.Description",
+          "Room.Floor -> Floor.Building -> Building.City"
+        ]
+      },
+      "credentials": [
+        "HTTP Basic Auth: Local CMDBuild Admin Test"
+      ],
+      "management": {
+        "restart_supported": false,
+        "cancel_supported": false,
+        "execution_history_supported": false
+      }
+    },
+    {
+      "workflow_id": "hr_verify_manager",
+      "display_name": "Проверка руководителя по кадровой выгрузке",
+      "business_scenario": "hr_manager_verification",
+      "endpoint_id": "n8n.hr.verify_manager",
+      "callback_endpoint_id": "n8n",
+      "enabled": true,
+      "read_only": true,
+      "async_supported": false,
+      "direct_supported": true,
+      "contract_url": "http://127.0.0.1:5678/webhook/contracts/openapi.json",
+      "execution_url": "http://127.0.0.1:5678/webhook/hr/verify-manager",
+      "openapi_operation_id": "verifyEmployeeManager",
+      "workflow_export": "workflows/hr-find-manager.json",
+      "operations": [
+        "verify_employee_manager"
+      ],
+      "source_system": "HR OpenAPI v1.0.22",
+      "required_inputs": [
+        "employee_full_name",
+        "claimed_manager_full_name"
+      ],
+      "optional_inputs": [
+        "relation_type",
+        "legal_entities"
+      ],
+      "relation_types": [
+        "administrative",
+        "managerial",
+        "both"
+      ],
+      "default_relation_type": "both",
+      "status_values": [
+        "OK",
+        "ERROR"
+      ],
+      "credentials": [
+        "HTTP Header Auth: HR API Header Auth"
+      ],
+      "environment": [
+        "HR_API_BASE_URL",
+        "N8N_WEBHOOK_TOKEN"
+      ],
+      "management": {
+        "restart_supported": false,
+        "cancel_supported": false,
+        "execution_history_supported": false
+      },
+      "ok_required_outputs": [
+        "employee_id",
+        "manager_id"
+      ],
+      "business_error_codes": [
+        "employee_not_found",
+        "employee_not_unique",
+        "manager_not_found",
+        "manager_not_unique",
+        "confirmed_relation_not_found",
+        "employee_id_not_found",
+        "manager_id_not_found"
+      ]
+    },
+    {
+      "workflow_id": "hr_applicant_participant",
+      "display_name": "Проверка заявителя среди сотрудника и руководителя",
+      "business_scenario": "hr_applicant_participant_check",
+      "endpoint_id": "n8n.hr.applicant_participant",
+      "callback_endpoint_id": "n8n",
+      "enabled": true,
+      "read_only": true,
+      "async_supported": false,
+      "direct_supported": true,
+      "contract_url": "http://127.0.0.1:5678/webhook/contracts/openapi.json",
+      "execution_url": "http://127.0.0.1:5678/webhook/hr/verify-applicant-participant",
+      "openapi_operation_id": "verifyApplicantParticipant",
+      "workflow_export": "workflows/hr-applicant-participant-webhook.json",
+      "operations": [
+        "verify_applicant_participant"
+      ],
+      "source_system": "request_payload",
+      "required_inputs": [
+        "applicant_full_name",
+        "employee_full_name",
+        "manager_full_name"
+      ],
+      "matching": {
+        "mode": "normalized_full_name",
+        "normalization": [
+          "trim",
+          "collapse_whitespace",
+          "toLocaleLowerCase(ru-RU)"
+        ],
+        "external_lookup": false
+      },
+      "matched_roles": [
+        "employee",
+        "manager",
+        "both"
+      ],
+      "status_values": [
+        "OK",
+        "ERROR"
+      ],
+      "environment": [
+        "N8N_WEBHOOK_TOKEN"
+      ],
+      "management": {
+        "restart_supported": false,
+        "cancel_supported": false,
+        "execution_history_supported": false
+      },
+      "ok_required_outputs": [
+        "matched_role"
+      ],
+      "business_error_codes": [
+        "applicant_not_participant"
+      ]
+    },
+    {
+      "workflow_id": "ad_user_login_lookup",
+      "display_name": "Поиск login и email пользователя в AD",
+      "business_scenario": "ad_user_login_lookup",
+      "endpoint_id": "n8n.ad.user_login_lookup",
+      "callback_endpoint_id": "n8n",
+      "enabled": true,
+      "read_only": true,
+      "async_supported": false,
+      "direct_supported": true,
+      "contract_url": "http://127.0.0.1:5678/webhook/contracts/openapi.json",
+      "execution_url": "http://127.0.0.1:5678/webhook/ad/user/login-lookup",
+      "openapi_operation_id": "lookupAdUserLogin",
+      "workflow_export": "workflows/ad-user-login-lookup-webhook.json",
+      "operations": [
+        "lookup_ad_user_login"
+      ],
+      "source_system": "MS AD",
+      "required_inputs": [
+        "full_name",
+        "employee_id"
+      ],
+      "optional_inputs": [
+        "full_name_attribute",
+        "employee_id_attribute",
+        "login_attribute",
+        "email_attribute",
+        "base_dn"
+      ],
+      "ad": {
+        "base_dn_env": "AD_BASE_DN",
+        "default_full_name_attribute": "displayName",
+        "default_employee_id_attribute": "employeeID",
+        "default_login_attribute": "sAMAccountName",
+        "default_attribute_env": [
+          "AD_FULL_NAME_ATTRIBUTE",
+          "AD_EMPLOYEE_ID_ATTRIBUTE",
+          "AD_LOGIN_ATTRIBUTE",
+          "AD_EMAIL_ATTRIBUTE"
+        ],
+        "credential_name": "MS AD LDAPS",
+        "transport": "LDAPS/TLS through n8n LDAP credential",
+        "default_email_attribute": "mail"
+      },
+      "status_values": [
+        "OK",
+        "ERROR"
+      ],
+      "credentials": [
+        "LDAP: MS AD LDAPS"
+      ],
+      "environment": [
+        "AD_BASE_DN",
+        "N8N_WEBHOOK_TOKEN"
+      ],
+      "management": {
+        "restart_supported": false,
+        "cancel_supported": false,
+        "execution_history_supported": false
+      },
+      "ok_required_outputs": [
+        "login",
+        "email"
+      ],
+      "business_error_codes": [
+        "ad_user_not_found",
+        "ad_user_not_unique",
+        "ad_login_not_found",
+        "ad_email_not_found"
+      ]
+    },
+    {
+      "workflow_id": "ad_user_password_reset",
+      "display_name": "Смена пароля пользователя в AD",
+      "business_scenario": "ad_user_password_reset",
+      "endpoint_id": "n8n.ad.user_password_reset",
+      "callback_endpoint_id": "n8n",
+      "enabled": true,
+      "read_only": false,
+      "async_supported": false,
+      "direct_supported": false,
+      "contract_url": "http://127.0.0.1:5678/webhook/contracts/openapi.json",
+      "execution_url": "http://127.0.0.1:5678/webhook/ad/user/reset-password",
+      "openapi_operation_id": "resetAdUserPassword",
+      "workflow_export": "workflows/ad-password-reset-webhook.json",
+      "operations": [
+        "reset_ad_user_password"
+      ],
+      "source_system": "MS AD",
+      "required_inputs": [
+        "login"
+      ],
+      "optional_inputs": [
+        "password_length"
+      ],
+      "ad": {
+        "base_dn_env": "AD_PASSWORD_RESET_BASE_DN or AD_BASE_DN",
+        "default_login_attribute": "sAMAccountName",
+        "default_password_length": 12,
+        "change_on_first_login_attribute": "pwdLastSet",
+        "password_attribute": "unicodePwd",
+        "default_attribute_env": [
+          "AD_PASSWORD_RESET_LOGIN_ATTRIBUTE",
+          "AD_LOGIN_ATTRIBUTE"
+        ],
+        "credential_name": "MS AD LDAPS",
+        "transport": "LDAPS/TLS through n8n LDAP credential",
+        "allowed_chars_env": "AD_PASSWORD_ALLOWED_CHARS"
+      },
+      "status_values": [
+        "OK",
+        "ERROR"
+      ],
+      "credentials": [
+        "LDAP: MS AD LDAPS"
+      ],
+      "environment": [
+        "AD_BASE_DN",
+        "N8N_WEBHOOK_TOKEN",
+        "N8N_INTERNAL_RUNBOOK_TOKEN"
+      ],
+      "management": {
+        "restart_supported": false,
+        "cancel_supported": false,
+        "execution_history_supported": false
+      },
+      "ok_required_outputs": [
+        "password",
+        "change_on_first_login"
+      ],
+      "business_error_codes": [
+        "ad_user_lookup_failed",
+        "ad_user_not_found",
+        "ad_user_not_unique",
+        "ad_user_dn_not_found",
+        "ad_password_update_failed",
+        "ad_password_update_unconfirmed"
+      ],
+      "internal_only": true
+    },
+    {
+      "workflow_id": "ad_password_reset_process",
+      "display_name": "Обработка заявки на смену пароля AD",
+      "business_scenario": "ad_password_reset_process",
+      "endpoint_id": "n8n.ad.password_reset_process",
+      "callback_endpoint_id": "n8n",
+      "enabled": true,
+      "read_only": false,
+      "async_supported": false,
+      "direct_supported": true,
+      "contract_url": "http://127.0.0.1:5678/webhook/contracts/openapi.json",
+      "execution_url": "http://127.0.0.1:5678/webhook/ad/password-reset/process",
+      "openapi_operation_id": "processAdPasswordResetRequest",
+      "workflow_export": "workflows/ad-password-reset-process-webhook.json",
+      "operations": [
+        "process_ad_password_reset_request"
+      ],
+      "source_system": "MS AD + HR + SMTP",
+      "required_inputs": [
+        "service_request",
+        "applicant_full_name",
+        "employee_full_name",
+        "claimed_manager_full_name",
+        "approval_id",
+        "approved_by",
+        "idempotency_key"
+      ],
+      "optional_inputs": [],
+      "depends_on": [
+        "hr_applicant_participant",
+        "hr_verify_manager",
+        "ad_user_login_lookup",
+        "ad_user_password_reset",
+        "templated_email_dispatch"
+      ],
+      "password_handling": {
+        "generated_by": "ad_user_password_reset",
+        "delivered_by_template": "ad_password_reset_notification",
+        "returned_to_caller": false,
+        "execution_history_saved": false
+      },
+      "status_values": [
+        "OK",
+        "ERROR"
+      ],
+      "credentials": [
+        "LDAP: MS AD LDAPS",
+        "HTTP Header Auth: HR API Header Auth",
+        "SMTP credential on sendTemplatedEmail dependency"
+      ],
+      "environment": [
+        "AD_BASE_DN",
+        "HR_API_BASE_URL",
+        "N8N_WEBHOOK_TOKEN",
+        "N8N_INTERNAL_WEBHOOK_BASE_URL",
+        "N8N_INTERNAL_RUNBOOK_TOKEN"
+      ],
+      "management": {
+        "restart_supported": false,
+        "cancel_supported": false,
+        "execution_history_supported": false
+      },
+      "ok_required_outputs": [
+        "password_changed",
+        "notification_sent",
+        "steps"
+      ],
+      "business_error_codes": [
+        "applicant_participant_applicant_not_participant",
+        "manager_verification_employee_not_unique",
+        "manager_verification_manager_id_not_found",
+        "employee_ad_lookup_ad_user_not_found",
+        "manager_ad_lookup_ad_user_not_found",
+        "password_reset_ad_password_update_failed",
+        "notification_email_send_failed",
+        "password_reset_ad_password_update_unconfirmed"
+      ],
+      "approval_required": true,
+      "idempotency": {
+        "required": true,
+        "key_field": "idempotency_key",
+        "propagated_to_internal_calls": true
       }
     }
   ]

@@ -78,6 +78,12 @@
         1080,
         200
       ],
+      "credentials": {
+        "smtp": {
+          "id": "Fh3kVhbHL6XxDh1c",
+          "name": "GreenMail SMTP (local test)"
+        }
+      },
       "continueOnFail": true
     },
     {
@@ -125,6 +131,118 @@
       "position": [
         1080,
         420
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Webhook отправки письма\n\nДелает: Принимает POST /webhook/email/send с to, subject, body и optional cc/bcc/replyTo.\n\nОпирается на: Header X-ServiceDesk-Token и production webhook registration.\n\nОшибки/ветки: Без token возвращается 401; формат body валидирует Code node.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "send-email-webhook-note",
+      "name": "Note: Webhook отправки письма",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        470
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Подготовка письма\n\nДелает: Валидирует auth, recipients, subject/body, attachments unsupported и подготавливает поля для Email Send node.\n\nОпирается на: N8N_WEBHOOK_TOKEN и request body.\n\nОшибки/ветки: 400 для missing fields, invalid email или unsupported attachments; 401 для invalid token.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "send-email-validate-request-note",
+      "name": "Note: Подготовка письма",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        520,
+        470
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Запрос валиден?\n\nДелает: Отправляет валидный запрос в SMTP ветку или ошибку в error response.\n\nОпирается на: Boolean shouldSend из узла подготовки письма.\n\nОшибки/ветки: False branch не вызывает SMTP и возвращает validation/auth error.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "send-email-if-valid-note",
+      "name": "Note: Запрос валиден?",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        800,
+        470
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Отправка email\n\nДелает: Отправляет plain text email через SMTP credential.\n\nОпирается на: SMTP credential, N8N_MAIL_FROM или fallback noreply@local.dev, prepared toEmail/subject/body.\n\nОшибки/ветки: SMTP failures передаются в result node благодаря continueOnFail.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "send-email-node-note",
+      "name": "Note: Отправка email",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1080,
+        370
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Результат отправки\n\nДелает: Преобразует output Email Send node в status sent или email_send_failed.\n\nОпирается на: Output/error поля Email Send node.\n\nОшибки/ветки: Возвращает 502 при SMTP failure.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "send-email-build-response-note",
+      "name": "Note: Результат отправки",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        370
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Ответ отправки\n\nДелает: Возвращает successful JSON response caller-у.\n\nОпирается на: statusCode/response из узла результата отправки.\n\nОшибки/ветки: Неверная response shape нарушит direct email contract.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "send-email-success-response-note",
+      "name": "Note: Ответ отправки",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1600,
+        370
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Ответ ошибки\n\nДелает: Возвращает validation/auth error без SMTP.\n\nОпирается на: statusCode/response из узла подготовки письма.\n\nОшибки/ветки: Используется для 400/401 ошибок до Email Send node.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "send-email-error-response-note",
+      "name": "Note: Ответ ошибки",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1080,
+        590
       ]
     }
   ],
@@ -195,5 +313,6 @@
   "active": false,
   "settings": {
     "executionOrder": "v1"
-  }
+  },
+  "description": "Логика работы: отправляет plain text email по прямому webhook без шаблонов.\n\nWorkflow валидирует token, recipients, subject/body и optional cc/bcc/replyTo, затем отправляет через SMTP credential.\n\nОтладка: проверить N8N_WEBHOOK_TOKEN, SMTP credential GreenMail/production, выполнить auth-negative и happy-path smoke, затем проверить mailbox."
 }

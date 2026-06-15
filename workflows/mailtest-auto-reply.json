@@ -19,7 +19,13 @@
       "position": [
         240,
         300
-      ]
+      ],
+      "credentials": {
+        "imap": {
+          "id": "4vumCzVocGKeTH2I",
+          "name": "GreenMail IMAP (local test)"
+        }
+      }
     },
     {
       "parameters": {
@@ -76,6 +82,76 @@
       "position": [
         1080,
         220
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "Fh3kVhbHL6XxDh1c",
+          "name": "GreenMail SMTP (local test)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "### Получение письма\n\nДелает: Следит за IMAP mailbox automation-test@local.test и получает входящие письма.\n\nОпирается на: GreenMail IMAP credential, host mailtest:3143 и unread messages.\n\nОшибки/ветки: IMAP credential/network/mailbox ошибки остановят trigger или execution.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "mailtest-imap-trigger-note",
+      "name": "Note: Получение письма",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        470
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Подготовка автоответа\n\nДелает: Формирует subject/body автоответа и определяет получателя.\n\nОпирается на: Parsed email fields from IMAP trigger.\n\nОшибки/ветки: Если sender отсутствует или письмо уже похоже на автоответ, выставляет флаг не отвечать.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "mailtest-build-reply-note",
+      "name": "Note: Подготовка автоответа",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        520,
+        470
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Нужен ответ?\n\nДелает: Пропускает дальше только письма, для которых нужен автоответ.\n\nОпирается на: Boolean shouldReply из Code node.\n\nОшибки/ветки: False branch завершает workflow без SMTP отправки.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "mailtest-if-reply-note",
+      "name": "Note: Нужен ответ?",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        800,
+        470
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Отправка автоответа\n\nДелает: Отправляет reply через GreenMail SMTP.\n\nОпирается на: SMTP credential, prepared recipient/subject/body.\n\nОшибки/ветки: SMTP credential/network ошибки приводят к failed execution.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "mailtest-send-reply-note",
+      "name": "Note: Отправка автоответа",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1080,
+        390
       ]
     }
   ],
@@ -118,5 +194,7 @@
   "active": false,
   "settings": {
     "executionOrder": "v1"
-  }
+  },
+  "description": "Логика работы: локальный demo workflow читает письма из GreenMail IMAP и отправляет автоответ через GreenMail SMTP.\n\nWorkflow получает unread mail, строит reply, проверяет нужна ли отправка, затем отправляет ответ sender-у.\n\nОтладка: проверить GreenMail webmail/API, IMAP/SMTP credentials, executions IMAP trigger и node Подготовка автоответа.",
+  "id": "f58j7o0gwjfSzPNt"
 }

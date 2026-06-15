@@ -46,6 +46,8 @@ curl -fsS http://127.0.0.1:5678/webhook/contracts/email-templates.json | jq '.sc
 ```text
 "1.0"
 "provider_line_repair_request"
+"provider_channel_outage_test"
+"ad_password_reset_notification"
 ```
 
 ## GitHub Dev / GitLab Prod

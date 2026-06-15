@@ -131,6 +131,43 @@
           "example": "12345678"
         }
       ]
+    },
+    {
+      "template_id": "ad_password_reset_notification",
+      "display_name": "Уведомление о смене пароля AD",
+      "description": "Уведомление о выполненной смене пароля пользователя по заявке ServiceDesk.",
+      "subject_template": "Смена пароля по заявке № {{service_request}}",
+      "body_template": "Добрый день!\nПо заявке № {{service_request}} для вашего сотрудника {{employee_full_name}} был изменен пароль.\nНовый пароль: {{password}}\nВнимание, требуется поменять пароль при первом входе.",
+      "required_params": [
+        "service_request",
+        "employee_full_name",
+        "password"
+      ],
+      "optional_params": [],
+      "params": [
+        {
+          "name": "service_request",
+          "type": "string",
+          "required": true,
+          "description": "Номер заявки ServiceDesk, по которой выполнена смена пароля.",
+          "example": "12345678"
+        },
+        {
+          "name": "employee_full_name",
+          "type": "string",
+          "required": true,
+          "description": "ФИО сотрудника, для которого изменен пароль.",
+          "example": "Иванов Иван Иванович"
+        },
+        {
+          "name": "password",
+          "type": "string",
+          "required": true,
+          "sensitive": true,
+          "description": "Новый пароль пользователя. Считать секретом; не логировать и не хранить вне согласованного процесса передачи.",
+          "example": "<generated-password>"
+        }
+      ]
     }
   ]
 }

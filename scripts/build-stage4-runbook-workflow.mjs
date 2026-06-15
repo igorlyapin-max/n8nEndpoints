@@ -2,6 +2,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import process from 'node:process';
+import { documentedWorkflow } from './workflow-inline-documentation.mjs';
 
 const WORKFLOW_PATH = 'workflows/stage4-runbook-webhook.json';
 
@@ -13,9 +14,12 @@ const prepareCode = String.raw`const input = $input.first().json;
 const headers = input.headers || {};
 const body = input.body && typeof input.body === "object" ? input.body : {};
 const env = typeof $env !== "undefined" ? $env : {};
-const expectedToken = env.N8N_WEBHOOK_TOKEN || (typeof process !== "undefined" ? process.env.N8N_WEBHOOK_TOKEN : "") || "";
+function envValue(name) {
+  return env[name] || (typeof process !== "undefined" ? process.env[name] : "") || "";
+}
+const expectedToken = envValue("N8N_WEBHOOK_TOKEN");
 const actualToken = headers["x-servicedesk-token"] || headers["X-ServiceDesk-Token"] || headers["X-Servicedesk-Token"] || "";
-const debugLevel = String(env.N8N_WORKFLOW_DEBUG || (typeof process !== "undefined" ? process.env.N8N_WORKFLOW_DEBUG : "") || "off");
+const debugLevel = String(envValue("N8N_WORKFLOW_DEBUG") || "off");
 
 function diagnostic(level, event, fields = {}) {
   const order = { off: 0, Basic: 1, Verbose: 2 };
@@ -55,10 +59,67 @@ function stringValue(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function parseHttpUrl(raw) {
+  const match = String(raw || "").match(/^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^/?#]*)([^?#]*)?(?:\?[^#]*)?(?:#.*)?$/);
+  if (!match) return null;
+  const protocol = match[1].toLowerCase() + ":";
+  const authority = match[2] || "";
+  const pathname = match[3] || "/";
+  if (!authority) return null;
+  const atIndex = authority.lastIndexOf("@");
+  const hasCredentials = atIndex !== -1;
+  const hostPort = hasCredentials ? authority.slice(atIndex + 1) : authority;
+  if (!hostPort) return null;
+  let hostname = "";
+  let originHost = hostPort;
+  if (hostPort.startsWith("[")) {
+    const end = hostPort.indexOf("]");
+    if (end <= 1) return null;
+    hostname = hostPort.slice(1, end);
+    const portPart = hostPort.slice(end + 1);
+    if (portPart && !/^:\d{1,5}$/.test(portPart)) return null;
+    originHost = "[" + hostname.toLowerCase() + "]" + portPart;
+  } else {
+    if (hostPort.includes("[") || hostPort.includes("]")) return null;
+    const parts = hostPort.split(":");
+    if (parts.length > 2) return null;
+    hostname = parts[0];
+    if (!hostname) return null;
+    if (parts[1] !== undefined && !/^\d{1,5}$/.test(parts[1])) return null;
+    originHost = hostname.toLowerCase() + (parts[1] !== undefined ? ":" + parts[1] : "");
+  }
+  return { protocol, hasCredentials, hostname: hostname.toLowerCase(), origin: protocol + "//" + originHost, pathname };
+}
+
+function validateCallbackUrl(value) {
+  const raw = stringValue(value);
+  const parsed = parseHttpUrl(raw);
+  if (!parsed) return { reason: "invalid_url" };
+  if (!["http:", "https:"].includes(parsed.protocol)) return { reason: "invalid_scheme" };
+  if (parsed.hasCredentials) return { reason: "credentials_not_allowed" };
+  const envName = stringValue(envValue("NODE_ENV") || envValue("N8N_ENVIRONMENT") || envValue("ENVIRONMENT")).toLowerCase();
+  const localEnv = !envName || envName === "development" || envName === "dev" || envName === "local" || envName === "test";
+  const production = envName === "production" || envName === "prod";
+  const hostname = parsed.hostname.toLowerCase();
+  const localHttp = parsed.protocol === "http:" && (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || (!hostname.includes(".") && !/^[0-9.]+$/.test(hostname)));
+  const orchestratorBase = stringValue(envValue("ORCHESTRATOR_PUBLIC_URL"));
+  if (!orchestratorBase && !localEnv && !localHttp) return { reason: "missing_orchestrator_public_url" };
+  if (orchestratorBase) {
+    const base = parseHttpUrl(orchestratorBase);
+    if (!base || base.hasCredentials) return { reason: "invalid_orchestrator_public_url" };
+    const basePath = base.pathname.replace(/\/+$/, "");
+    if (parsed.origin !== base.origin || (basePath && parsed.pathname !== basePath && !parsed.pathname.startsWith(basePath + "/"))) {
+      return { reason: "outside_orchestrator_public_url" };
+    }
+  }
+  if (parsed.protocol !== "https:" && !(localHttp && !production)) return { reason: "https_required" };
+  return null;
+}
+
 function callbackTokenFor(source) {
   const normalized = String(source || "").replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase();
-  const sourceToken = normalized ? env["INTEGRATION_CALLBACK_TOKEN__" + normalized] : "";
-  const fallback = env.INTEGRATION_CALLBACK_TOKEN || (typeof process !== "undefined" ? process.env.INTEGRATION_CALLBACK_TOKEN : "") || "";
+  const sourceToken = normalized ? envValue("INTEGRATION_CALLBACK_TOKEN__" + normalized) : "";
+  const fallback = envValue("INTEGRATION_CALLBACK_TOKEN");
   return sourceToken || fallback;
 }
 
@@ -172,6 +233,13 @@ if (needsCallback && !stringValue(asyncCallback.callback_url)) {
   );
 }
 
+if (needsCallback) {
+  const callbackError = validateCallbackUrl(asyncCallback.callback_url);
+  if (callbackError) {
+    return error(400, "invalid_callback_url", "callback_url не соответствует политике безопасности.", callbackError);
+  }
+}
+
 if (needsKafka && !stringValue(asyncCallback.result_topic)) {
   return error(
     400,
@@ -181,38 +249,60 @@ if (needsKafka && !stringValue(asyncCallback.result_topic)) {
 }
 
 const externalEvent = buildExternalEvent(asyncCallback, { ...invocation, action_id: actionId }, parameters, acceptedAt);
+const deliveryStatus = {
+  requested_transport: resultTransport,
+  http_callback: needsCallback ? "pending" : "not_requested",
+  kafka_event: needsKafka ? "pending" : "not_requested"
+};
 
 if (needsCallback) {
   const callbackToken = callbackTokenFor(asyncCallback.source);
   if (!callbackToken) {
-    return error(500, "missing_callback_token", "Callback token is not configured for HTTP callback delivery.");
+    deliveryStatus.http_callback = "failed";
+    deliveryStatus.http_callback_error = "missing_callback_token";
+    if (!needsKafka) {
+      return error(500, "missing_callback_token", "Callback token is not configured for HTTP callback delivery.");
+    }
   }
-  const httpRequest = this?.helpers?.httpRequest?.bind(this.helpers);
-  if (!httpRequest) {
-    return error(500, "http_request_helper_unavailable", "n8n httpRequest helper is not available in Code node.");
-  }
-  try {
-    await httpRequest({
-      method: "POST",
-      url: asyncCallback.callback_url,
-      headers: {
-        "Content-Type": "application/json",
-        "X-ServiceDesk-Callback-Token": callbackToken
-      },
-      body: externalEvent,
-      json: true
-    });
-    diagnostic("Basic", "stage4_external_event_callback_sent", {
-      source: externalEvent.source,
-      case_id: externalEvent.case_id,
-      wait_id: externalEvent.wait_id,
-      correlation_id: externalEvent.correlation_id,
-      event_id: externalEvent.event_id
-    });
-  } catch {
-    return error(502, "callback_delivery_failed", "ExternalEvent HTTP callback delivery failed.");
+  if (callbackToken) {
+    const httpRequest = this?.helpers?.httpRequest?.bind(this.helpers);
+    if (!httpRequest) {
+      deliveryStatus.http_callback = "failed";
+      deliveryStatus.http_callback_error = "http_request_helper_unavailable";
+      if (!needsKafka) {
+        return error(500, "http_request_helper_unavailable", "n8n httpRequest helper is not available in Code node.");
+      }
+    } else {
+      try {
+        await httpRequest({
+          method: "POST",
+          url: asyncCallback.callback_url,
+          headers: {
+            "Content-Type": "application/json",
+            "X-ServiceDesk-Callback-Token": callbackToken
+          },
+          body: externalEvent,
+          json: true
+        });
+        deliveryStatus.http_callback = "sent";
+        diagnostic("Basic", "stage4_external_event_callback_sent", {
+          source: externalEvent.source,
+          case_id: externalEvent.case_id,
+          wait_id: externalEvent.wait_id,
+          correlation_id: externalEvent.correlation_id,
+          event_id: externalEvent.event_id
+        });
+      } catch {
+        deliveryStatus.http_callback = "failed";
+        deliveryStatus.http_callback_error = "callback_delivery_failed";
+        if (!needsKafka) {
+          return error(502, "callback_delivery_failed", "ExternalEvent HTTP callback delivery failed.");
+        }
+      }
+    }
   }
 }
+externalEvent.metadata.delivery_status = deliveryStatus;
 
 response.async_delivery = true;
 response.correlation_id = asyncCallback.correlation_id;
@@ -220,6 +310,7 @@ response.wait_id = asyncCallback.wait_id;
 response.result_transport = resultTransport;
 response.result_topic = asyncCallback.result_topic || null;
 response.has_callback_url = Boolean(asyncCallback.callback_url);
+response.delivery_status = deliveryStatus;
 
 diagnostic("Basic", "stage4_async_request_accepted", {
   source: externalEvent.source,
@@ -243,28 +334,36 @@ return [
         idempotency_key: externalEvent.idempotency_key
       }),
       externalEvent,
+      delivery_status: deliveryStatus,
       statusCode: 200,
       response
     }
   }
 ];`;
 
-const kafkaResponseCode = String.raw`return [
+const kafkaResponseCode = String.raw`const input = $input.first().json || {};
+const deliveryStatus = {
+  ...(input.delivery_status || input.response?.delivery_status || {}),
+  kafka_event: "published"
+};
+return [
   {
     json: {
       statusCode: 200,
       response: {
+        ...(input.response || {}),
         runbook_status: "accepted",
         message: "n8n webhook ранбука этапа 4 получил авторизованный запрос; ExternalEvent опубликован в Kafka.",
         async_delivery: true,
-        kafka_delivery: true
+        kafka_delivery: true,
+        delivery_status: deliveryStatus
       }
     }
   }
 ];`;
 
 function workflow() {
-  return {
+  return documentedWorkflow({
     id: 'A6GKOMxwTBH5Q4kg',
     name: 'Webhook ранбука этапа 4',
     nodes: [
@@ -431,8 +530,11 @@ function workflow() {
     active: false,
     settings: {
       executionOrder: 'v1',
+      saveDataErrorExecution: 'none',
+      saveDataSuccessExecution: 'none',
+      saveManualExecutions: false,
     },
-  };
+  });
 }
 
 function main() {

@@ -52,6 +52,8 @@ Body:
 
 `params` должен содержать все поля из `required_params` выбранного шаблона. Плейсхолдеры в `subject_template` и `body_template` имеют вид `{{paramName}}`.
 
+Если параметр в catalog помечен `sensitive: true`, caller должен считать значение секретом и не логировать его. Сейчас это относится к параметру `password` шаблона `ad_password_reset_notification`.
+
 Runtime validation:
 
 - required params не могут быть пустыми;
@@ -128,3 +130,42 @@ Attachments в версии v1 не поддерживаются. Если за�
 ```
 
 После рендера тема будет выглядеть как `Пропадание связи по каналу Москва`.
+
+## Шаблон уведомления о смене пароля AD
+
+`ad_password_reset_notification` использует только латинские имена параметров:
+
+- `service_request`
+- `employee_full_name`
+- `password`
+
+Subject template:
+
+```text
+Смена пароля по заявке № {{service_request}}
+```
+
+Body template:
+
+```text
+Добрый день!
+По заявке № {{service_request}} для вашего сотрудника {{employee_full_name}} был изменен пароль.
+Новый пароль: {{password}}
+Внимание, требуется поменять пароль при первом входе.
+```
+
+Пример payload:
+
+```json
+{
+  "to": ["manager@example.com"],
+  "templateId": "ad_password_reset_notification",
+  "params": {
+    "service_request": "12345678",
+    "employee_full_name": "Иванов Иван Иванович",
+    "password": "<generated-password>"
+  }
+}
+```
+
+`password` помечен в catalog как `sensitive: true`. Не используйте этот шаблон через каналы, где request/response body сохраняется в execution history, gateway logs, tickets или callback/Kafka payloads.

@@ -2,6 +2,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import process from 'node:process';
+import { documentedWorkflow } from './workflow-inline-documentation.mjs';
 
 const WORKFLOW_PATH = 'workflows/update-zabbix-problem-webhook.json';
 
@@ -213,7 +214,7 @@ return [{
 }];`;
 
 function workflow() {
-  return {
+  return documentedWorkflow({
     id: 'updateZabbixProblem',
     name: 'Zabbix: обновление problem по URL',
     nodes: [
@@ -283,8 +284,11 @@ function workflow() {
     active: false,
     settings: {
       executionOrder: 'v1',
+      saveDataErrorExecution: 'none',
+      saveDataSuccessExecution: 'none',
+      saveManualExecutions: false,
     },
-  };
+  });
 }
 
 function main() {

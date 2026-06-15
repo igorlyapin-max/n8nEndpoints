@@ -75,6 +75,13 @@ When `result_transport` is `http_callback` or `both`, `callback_url` is required
 
 When `result_transport` is `kafka_event` or `both`, `result_topic` is required. Local ServiceDesk default topic is `external.events`.
 
+Transport security:
+
+- HTTP callback URL is admin-configured by `serviceDeskAgents` and passed in `callback_url`. Local/dev may use `http://`; production should use `https://`.
+- `callback_url` must use `http` or `https`, must not contain user/password credentials, and when `ORCHESTRATOR_PUBLIC_URL` is configured it must have the same origin and the same or nested path.
+- In production mode (`NODE_ENV`, `N8N_ENVIRONMENT` or `ENVIRONMENT` is `production`/`prod`), non-HTTPS callback URLs are rejected outside local/dev loopback or compose-host exceptions.
+- Kafka delivery is secured by Kafka credential, broker ACL and either `SASL_SSL` or `SSL`/mTLS. Do not model Kafka as HTTPS.
+
 ## ExternalEvent Result
 
 Async delivery sends the canonical ServiceDesk `ExternalEvent`:
@@ -144,6 +151,7 @@ Common errors:
 - `400 missing_async_callback_fields` - required async callback correlation fields are absent.
 - `400 invalid_result_transport` - result transport is not `http_callback`, `kafka_event` or `both`.
 - `400 missing_callback_url` - HTTP callback was selected without `callback_url`.
+- `400 invalid_callback_url` - `callback_url` violates scheme, credentials, HTTPS, or `ORCHESTRATOR_PUBLIC_URL` policy.
 - `400 missing_result_topic` - Kafka delivery was selected without `result_topic`.
 - `500 missing_callback_token` - HTTP callback was selected, but callback token env is not configured.
 - `502 callback_delivery_failed` - HTTP callback transport failed.

@@ -1,0 +1,14 @@
+services:
+  n8n:
+    networks:
+      - default
+      - cmdbuild_default
+    environment:
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      N8N_INTERNAL_RUNBOOK_TOKEN: replace_with_dev_internal_runbook_token
+      ZABBIX_API_URLS_BY_ORIGIN: '{"http://localhost:8081":"http://zabbix-web:8080/api_jsonrpc.php"}'
+      ZABBIX_API_TOKENS_BY_ORIGIN: '{"http://localhost:8081":"50ba545b2adf03cb09cdeea259ccaaff66fa0cedfb748d390a2941b105683c35"}'
+
+networks:
+  cmdbuild_default:
+    external: true

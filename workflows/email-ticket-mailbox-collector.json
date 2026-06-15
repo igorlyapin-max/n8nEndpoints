@@ -1,0 +1,149 @@
+{
+  "id": "emailTicketMailboxCollector",
+  "name": "Email: индекс входящих писем",
+  "nodes": [
+    {
+      "parameters": {
+        "mailbox": "INBOX",
+        "postProcessAction": "nothing",
+        "format": "simple",
+        "downloadAttachments": false,
+        "options": {
+          "customEmailConfig": "[\"ALL\"]",
+          "trackLastMessageId": true
+        }
+      },
+      "id": "email-ticket-collector-imap-trigger",
+      "name": "Получение входящего письма",
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2.1,
+      "position": [
+        240,
+        300
+      ],
+      "credentials": {
+        "imap": {
+          "id": "4vumCzVocGKeTH2I",
+          "name": "GreenMail IMAP (local test)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const email = $input.first().json || {};\n\nconst sqlString = (value) => {\n  if (value === undefined || value === null) return 'NULL';\n  return \"'\" + String(value).replace(/\\u0000/g, '').replace(/'/g, \"''\") + \"'\";\n};\n\nconst textOf = (value) => {\n  if (value === undefined || value === null) return '';\n  if (typeof value === 'string') return value;\n  if (Array.isArray(value)) return value.map(textOf).filter(Boolean).join(', ');\n  if (typeof value === 'object') {\n    if (value.text) return String(value.text);\n    if (value.address) return String(value.address);\n    if (Array.isArray(value.value)) return value.value.map(textOf).filter(Boolean).join(', ');\n  }\n  return String(value);\n};\n\nconst extractAddress = (value) => {\n  const text = textOf(value);\n  const match = text.match(/<([^>]+)>/);\n  return (match ? match[1] : text).trim();\n};\n\nconst stripHtml = (html) => String(html || '')\n  .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ')\n  .replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')\n  .replace(/<[^>]+>/g, ' ')\n  .replace(/\\s+/g, ' ')\n  .trim();\n\nconst normalizeDate = (value) => {\n  const date = value ? new Date(value) : new Date();\n  if (Number.isNaN(date.getTime())) return new Date().toISOString();\n  return date.toISOString();\n};\n\nconst subject = String(email.subject || '').trim();\nconst fromEmail = extractAddress(email.from || email.sender || '');\nconst bodySource = email.text || email.textPlain || email.plainText || stripHtml(email.html || email.textHtml || '');\nconst bodyFull = String(bodySource || '');\nconst bodyLimit = 50000;\nconst bodyText = bodyFull.slice(0, bodyLimit);\nconst bodyTruncated = bodyFull.length > bodyLimit;\nconst receivedAt = normalizeDate(email.date || email.receivedAt || email.received_at || email.headers?.date);\nconst messageIdRaw = email.messageId || email.messageID || email['message-id'] || email.headers?.['message-id'] || '';\nconst fallbackId = ['fallback', receivedAt, fromEmail, subject].join(':').replace(/\\s+/g, ' ').slice(0, 900);\nconst messageId = String(messageIdRaw || fallbackId).trim();\nconst mailbox = String(email.mailbox || 'INBOX').trim() || 'INBOX';\n\nconst deliveryText = [subject, fromEmail, bodyText].join('\\n').toLowerCase();\nconst deliveryFailurePatterns = [\n  'undeliverable',\n  'delivery status notification',\n  'delivery has failed',\n  'mail delivery failed',\n  'failure notice',\n  'returned mail',\n  'mailer-daemon',\n  'postmaster',\n  'недостав',\n  'не доставлено',\n  'сообщение не доставлено'\n];\nconst deliveryFailureReason = deliveryFailurePatterns.find((pattern) => deliveryText.includes(pattern)) || '';\nconst isDeliveryFailure = Boolean(deliveryFailureReason);\n\nconst createTableSql = [\n  'CREATE TABLE IF NOT EXISTS n8n_mail_index (',\n  '  id bigserial PRIMARY KEY,',\n  '  message_id text NOT NULL UNIQUE,',\n  \"  mailbox text NOT NULL DEFAULT 'INBOX',\",\n  '  from_email text,',\n  '  subject text,',\n  '  body_text text,',\n  '  body_truncated boolean NOT NULL DEFAULT false,',\n  '  received_at timestamptz NOT NULL,',\n  '  indexed_at timestamptz NOT NULL DEFAULT now(),',\n  '  is_delivery_failure boolean NOT NULL DEFAULT false,',\n  '  delivery_failure_reason text',\n  ');',\n  'CREATE INDEX IF NOT EXISTS idx_n8n_mail_index_received_at ON n8n_mail_index (received_at);',\n  'CREATE INDEX IF NOT EXISTS idx_n8n_mail_index_delivery_failure ON n8n_mail_index (is_delivery_failure, received_at);'\n].join('\\n');\n\nconst sql = [\n  createTableSql,\n  'INSERT INTO n8n_mail_index (',\n  '  message_id,',\n  '  mailbox,',\n  '  from_email,',\n  '  subject,',\n  '  body_text,',\n  '  body_truncated,',\n  '  received_at,',\n  '  indexed_at,',\n  '  is_delivery_failure,',\n  '  delivery_failure_reason',\n  ') VALUES (',\n  '  ' + sqlString(messageId) + ',',\n  '  ' + sqlString(mailbox) + ',',\n  '  ' + sqlString(fromEmail) + ',',\n  '  ' + sqlString(subject) + ',',\n  '  ' + sqlString(bodyText) + ',',\n  '  ' + (bodyTruncated ? 'true' : 'false') + ',',\n  '  ' + sqlString(receivedAt) + '::timestamptz,',\n  '  now(),',\n  '  ' + (isDeliveryFailure ? 'true' : 'false') + ',',\n  '  ' + sqlString(deliveryFailureReason),\n  ')',\n  'ON CONFLICT (message_id) DO UPDATE SET',\n  '  mailbox = EXCLUDED.mailbox,',\n  '  from_email = EXCLUDED.from_email,',\n  '  subject = EXCLUDED.subject,',\n  '  body_text = EXCLUDED.body_text,',\n  '  body_truncated = EXCLUDED.body_truncated,',\n  '  received_at = EXCLUDED.received_at,',\n  '  indexed_at = now(),',\n  '  is_delivery_failure = EXCLUDED.is_delivery_failure,',\n  '  delivery_failure_reason = EXCLUDED.delivery_failure_reason;',\n  \"DELETE FROM n8n_mail_index WHERE received_at < now() - interval '7 days';\",\n  'SELECT ' + sqlString(messageId) + ' AS message_id, ' + sqlString(receivedAt) + '::timestamptz AS received_at, ' + (isDeliveryFailure ? 'true' : 'false') + ' AS is_delivery_failure;'\n].join('\\n');\n\nreturn [{ json: { sql, message_id: messageId, subject, from_email: fromEmail, received_at: receivedAt, is_delivery_failure: isDeliveryFailure } }];"
+      },
+      "id": "email-ticket-collector-prepare",
+      "name": "Подготовка индекса письма",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "database",
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}",
+        "options": {
+          "queryBatching": "independently"
+        }
+      },
+      "id": "email-ticket-collector-upsert",
+      "name": "Запись письма в индекс",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        800,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "localServiceDeskPostgres",
+          "name": "Local ServiceDesk Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "### Получение входящего письма\n\nДелает: Получает новые письма из IMAP mailbox без изменения read state и передает их в индексатор.\n\nОпирается на: IMAP credential, mailbox INBOX, customEmailConfig [\"ALL\"] и trackLastMessageId.\n\nОшибки/ветки: IMAP credential/network/mailbox ошибки остановят trigger; конфликт с другими readers снижает полноту индекса.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "email-ticket-collector-imap-trigger-note",
+      "name": "Note: Получение входящего письма",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        470
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Подготовка индекса письма\n\nДелает: Нормализует поля письма, ограничивает body, определяет delivery failure и строит SQL upsert.\n\nОпирается на: Parsed email fields from IMAP trigger и локальные правила NDR/bounce detection.\n\nОшибки/ветки: Пустой message_id получает fallback id; огромный body обрезается с body_truncated=true.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "email-ticket-collector-prepare-note",
+      "name": "Note: Подготовка индекса письма",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        520,
+        470
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Запись письма в индекс\n\nДелает: Создает таблицу n8n_mail_index при необходимости и записывает/обновляет письмо в Postgres.\n\nОпирается на: Postgres credential Local ServiceDesk Postgres и доступность servicedesk-agents-postgres.\n\nОшибки/ветки: Postgres credential/network/schema ошибки приводят к failed execution и письмо не попадает в индекс.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "email-ticket-collector-upsert-note",
+      "name": "Note: Запись письма в индекс",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        800,
+        470
+      ]
+    }
+  ],
+  "connections": {
+    "Получение входящего письма": {
+      "main": [
+        [
+          {
+            "node": "Подготовка индекса письма",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Подготовка индекса письма": {
+      "main": [
+        [
+          {
+            "node": "Запись письма в индекс",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false
+  },
+  "description": "Логика работы: индексирует входящие письма из IMAP mailbox в Postgres для последующего поиска по номеру заявки.\n\nWorkflow получает новые письма через IMAP trigger, нормализует subject/body/from/received_at, определяет best-effort delivery failure и делает upsert в n8n_mail_index.\n\nОтладка: проверить IMAP credential, Postgres credential Local ServiceDesk Postgres, таблицу n8n_mail_index и executions узлов подготовки/записи письма."
+}

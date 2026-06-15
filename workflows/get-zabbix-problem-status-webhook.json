@@ -1,0 +1,133 @@
+{
+  "id": "getZabbixProblemStatus",
+  "name": "Zabbix: статус problem по URL",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "zabbix/problem/status",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "get-zabbix-problem-status-webhook",
+      "name": "Webhook статуса Zabbix problem",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "42baf9f2-bf82-4d42-8434-afafbc46ea55",
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst headers = input.headers || {};\nconst body = input.body || {};\nconst expectedToken = (typeof $env !== 'undefined' && $env.N8N_WEBHOOK_TOKEN) || (typeof process !== 'undefined' && process.env.N8N_WEBHOOK_TOKEN) || '';\nconst actualToken = headers['x-servicedesk-token'] || headers['X-ServiceDesk-Token'] || headers['X-Servicedesk-Token'] || '';\nconst debugLevel = String((typeof $env !== 'undefined' && $env.N8N_WORKFLOW_DEBUG) || (typeof process !== 'undefined' && process.env.N8N_WORKFLOW_DEBUG) || 'off');\n\nconst diagnostic = (level, event, fields = {}) => {\n  const order = { off: 0, Basic: 1, Verbose: 2 };\n  if ((order[debugLevel] || 0) < (order[level] || 0)) return;\n  const safeFields = {};\n  for (const [key, value] of Object.entries(fields)) {\n    if (/token|password|secret/i.test(key)) continue;\n    safeFields[key] = value;\n  }\n  console.log(JSON.stringify({ ts: new Date().toISOString(), level, event, ...safeFields }));\n};\n\nconst response = (statusCode, code, message, details = {}) => [{\n  json: {\n    statusCode,\n    response: {\n      error: { code, message, ...details }\n    }\n  }\n}];\n\nconst errorResponse = (statusCode, code, message, details = {}) => {\n  diagnostic('Basic', 'get_zabbix_problem_status_rejected', { statusCode, code, zabbix_origin: details.zabbix_origin });\n  return response(statusCode, code, message, details);\n};\n\nif (!expectedToken || actualToken !== expectedToken) {\n  return errorResponse(401, 'unauthorized', 'Токен webhook отсутствует или некорректен.');\n}\n\nconst problemUrlRaw = String(body.problemUrl || body.problem_url || '').trim();\nif (!problemUrlRaw) return errorResponse(400, 'missing_problem_url', 'Поле problemUrl обязательно.');\n\nconst decodeQuery = (value) => {\n  try {\n    return decodeURIComponent(String(value || '').replace(/\\+/g, ' '));\n  } catch {\n    return String(value || '');\n  }\n};\n\nconst parseProblemUrl = (value) => {\n  const raw = String(value || '').trim();\n  const match = raw.match(/^(https?):\\/\\/([^/?#]+)(?:\\/[^?#]*)?(?:\\?([^#]*))?(?:#.*)?$/i);\n  if (!match) return null;\n  const scheme = match[1].toLowerCase();\n  const authority = match[2];\n  if (!authority || authority.includes('@')) return null;\n  const params = {};\n  for (const part of String(match[3] || '').split('&')) {\n    if (!part) continue;\n    const separator = part.indexOf('=');\n    const key = decodeQuery(separator >= 0 ? part.slice(0, separator) : part);\n    const paramValue = decodeQuery(separator >= 0 ? part.slice(separator + 1) : '');\n    if (key && params[key] === undefined) params[key] = paramValue;\n  }\n  return {\n    origin: scheme + '://' + authority,\n    queryParam: (name) => params[name] || ''\n  };\n};\n\nconst problemUrl = parseProblemUrl(problemUrlRaw);\nif (!problemUrl) {\n  return errorResponse(400, 'invalid_problem_url', 'Поле problemUrl должно быть корректным URL.');\n}\n\nconst eventid = String(problemUrl.queryParam('eventid') || '').trim();\nconst triggerid = String(problemUrl.queryParam('triggerid') || '').trim();\nif (!eventid) return errorResponse(400, 'missing_eventid', 'problemUrl должен содержать query parameter eventid.');\nif (!triggerid) return errorResponse(400, 'missing_triggerid', 'problemUrl должен содержать query parameter triggerid.');\nif (!/^[0-9]+$/.test(eventid)) return errorResponse(400, 'invalid_eventid', 'eventid должен быть числовой строкой.', { eventid });\nif (!/^[0-9]+$/.test(triggerid)) return errorResponse(400, 'invalid_triggerid', 'triggerid должен быть числовой строкой.', { triggerid });\n\nconst zabbixOrigin = problemUrl.origin;\n\nconst parseRegistry = (name) => {\n  const raw = (typeof $env !== 'undefined' && $env[name]) || (typeof process !== 'undefined' && process.env[name]) || '';\n  if (!raw) return {};\n  try {\n    const parsed = JSON.parse(raw);\n    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};\n  } catch {\n    throw new Error(name + ' must be a JSON object.');\n  }\n};\n\nlet tokenRegistry;\nlet apiUrlRegistry;\ntry {\n  tokenRegistry = parseRegistry('ZABBIX_API_TOKENS_BY_ORIGIN');\n  apiUrlRegistry = parseRegistry('ZABBIX_API_URLS_BY_ORIGIN');\n} catch (error) {\n  return errorResponse(400, 'invalid_zabbix_registry', 'Zabbix registry environment variables must be valid JSON objects.');\n}\n\nconst zabbixToken = String(tokenRegistry[zabbixOrigin] || '').trim();\nif (!zabbixToken) {\n  return errorResponse(400, 'unknown_zabbix_origin', 'Для zabbix_origin не найден API token в ZABBIX_API_TOKENS_BY_ORIGIN.', { zabbix_origin: zabbixOrigin });\n}\n\nconst zabbixApiUrl = String(apiUrlRegistry[zabbixOrigin] || (zabbixOrigin + '/api_jsonrpc.php')).trim();\nconst httpRequest = this?.helpers?.httpRequest?.bind(this.helpers);\n\nasync function zabbixRpc(method, params) {\n  if (!httpRequest) {\n    throw new Error('n8n httpRequest helper is not available in Code node.');\n  }\n\n  let payload;\n  try {\n    payload = await httpRequest({\n      method: 'POST',\n      url: zabbixApiUrl,\n      headers: {\n        'Content-Type': 'application/json-rpc',\n        Accept: 'application/json',\n        Authorization: 'Bearer ' + zabbixToken\n      },\n      body: {\n        jsonrpc: '2.0',\n        method,\n        params,\n        id: 1\n      },\n      json: true\n    });\n  } catch (error) {\n    throw new Error('zabbix_api_http_request_failed');\n  }\n  if (payload.error) {\n    throw new Error('zabbix_api_rpc_error');\n  }\n  return payload.result;\n}\n\nfunction normalizeRecoveryEventid(value) {\n  return String(value || '0').trim() || '0';\n}\n\nfunction buildSuccess(status, source, problemDetails) {\n  diagnostic('Basic', 'get_zabbix_problem_status_completed', { eventid, triggerid, zabbix_origin: zabbixOrigin, status, source });\n  return [{\n    json: {\n      statusCode: 200,\n      response: {\n        status,\n        eventid,\n        triggerid,\n        zabbix_origin: zabbixOrigin,\n        source,\n        problem: problemDetails\n      }\n    }\n  }];\n}\n\nlet events;\ntry {\n  events = await zabbixRpc('event.get', {\n    output: 'extend',\n    eventids: [eventid]\n  });\n} catch (error) {\n  return errorResponse(502, 'zabbix_event_get_failed', 'Zabbix event.get failed.', { zabbix_origin: zabbixOrigin });\n}\n\nif (Array.isArray(events) && events.length > 0) {\n  const event = events.find((candidate) => String(candidate.eventid) === eventid) || events[0];\n  if (String(event.objectid) !== triggerid) {\n    return errorResponse(409, 'trigger_mismatch', 'eventid найден, но objectid event не совпадает с triggerid из URL.', {\n      eventid,\n      triggerid,\n      zabbix_objectid: String(event.objectid || ''),\n      zabbix_origin: zabbixOrigin\n    });\n  }\n\n  const recoveryEventid = normalizeRecoveryEventid(event.r_eventid);\n  const status = recoveryEventid !== '0' || String(event.value || '') === '0' ? 'resolved' : 'problem';\n  return buildSuccess(status, 'event', {\n    name: event.name,\n    severity: event.severity,\n    acknowledged: event.acknowledged,\n    event_value: String(event.value || ''),\n    recovery_eventid: recoveryEventid,\n    recovery_clock: String(event.r_clock || '0')\n  });\n}\n\nlet triggers;\ntry {\n  triggers = await zabbixRpc('trigger.get', {\n    output: 'extend',\n    triggerids: [triggerid]\n  });\n} catch (error) {\n  return errorResponse(502, 'zabbix_trigger_get_failed', 'Zabbix trigger.get failed.', { zabbix_origin: zabbixOrigin });\n}\n\nif (!Array.isArray(triggers) || triggers.length === 0) {\n  return errorResponse(404, 'zabbix_trigger_not_found', 'Zabbix trigger не найден по triggerid.', { eventid, triggerid, zabbix_origin: zabbixOrigin });\n}\n\nconst trigger = triggers.find((candidate) => String(candidate.triggerid) === triggerid) || triggers[0];\nconst triggerValue = String(trigger.value || '0');\nconst status = triggerValue === '1' ? 'problem' : 'ok';\n\nreturn buildSuccess(status, 'trigger_fallback', {\n  name: trigger.description,\n  severity: trigger.priority,\n  acknowledged: null,\n  event_value: null,\n  recovery_eventid: null,\n  recovery_clock: null,\n  trigger_value: triggerValue\n});"
+      },
+      "id": "get-zabbix-problem-status-run",
+      "name": "Получение статуса Zabbix problem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}"
+        }
+      },
+      "id": "get-zabbix-problem-status-response",
+      "name": "Нормализованный ответ",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        800,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Webhook статуса Zabbix problem\n\nДелает: Принимает POST /webhook/zabbix/problem/status с problemUrl или problem_url.\n\nОпирается на: Header X-ServiceDesk-Token и production webhook registration.\n\nОшибки/ветки: Без token workflow возвращает 401; malformed body обрабатывается Code node.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "get-zabbix-problem-status-webhook-note",
+      "name": "Note: Webhook статуса Zabbix problem",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        470
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Получение статуса Zabbix problem\n\nДелает: Валидирует token и URL, ищет Zabbix registry по origin, вызывает event.get и при необходимости trigger.get.\n\nОпирается на: N8N_WEBHOOK_TOKEN, N8N_BLOCK_ENV_ACCESS_IN_NODE=false, ZABBIX_API_TOKENS_BY_ORIGIN, optional ZABBIX_API_URLS_BY_ORIGIN и this.helpers.httpRequest.\n\nОшибки/ветки: Возвращает 400 для URL/registry/origin ошибок, 409 для trigger mismatch, 404 если trigger не найден, 502 для Zabbix RPC failures.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "get-zabbix-problem-status-run-note",
+      "name": "Note: Получение статуса Zabbix problem",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        520,
+        470
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Нормализованный ответ\n\nДелает: Возвращает JSON status problem/resolved/ok или structured error.\n\nОпирается на: statusCode и response, сформированные Code node.\n\nОшибки/ветки: Если response shape нарушена, caller получит некорректный контрактный ответ.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "get-zabbix-problem-status-response-note",
+      "name": "Note: Нормализованный ответ",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        800,
+        470
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook статуса Zabbix problem": {
+      "main": [
+        [
+          {
+            "node": "Получение статуса Zabbix problem",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Получение статуса Zabbix problem": {
+      "main": [
+        [
+          {
+            "node": "Нормализованный ответ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false
+  },
+  "description": "Логика работы: read-only определяет статус Zabbix problem по UI URL и возвращает problem, resolved или ok.\n\nWorkflow валидирует X-ServiceDesk-Token, парсит eventid/triggerid, читает event.get, а если event недоступен, делает trigger.get fallback.\n\nОтладка: включить N8N_WORKFLOW_DEBUG=Basic, проверить ZABBIX_API_TOKENS_BY_ORIGIN/ZABBIX_API_URLS_BY_ORIGIN, затем выполнить auth-negative, invalid-url и happy-path smoke из deployment doc."
+}

@@ -1,0 +1,553 @@
+{
+  "id": "waitZabbixProblemStatus",
+  "name": "Zabbix: ожидание статуса problem",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "zabbix/problem/wait",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "wait-zabbix-problem-webhook",
+      "name": "Webhook ожидания Zabbix problem",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "88467d63-8e75-4da7-b39e-f69dbe33c7d0",
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json || {};\nconst headers = input.headers || {};\nconst body = input.body || {};\nconst envValue = (name) => (typeof $env !== 'undefined' && $env[name]) || (typeof process !== 'undefined' && process.env[name]) || '';\nconst expectedToken = envValue('N8N_WEBHOOK_TOKEN');\nconst actualToken = headers['x-servicedesk-token'] || headers['X-ServiceDesk-Token'] || headers['X-Servicedesk-Token'] || '';\nconst debugLevel = String(envValue('N8N_WORKFLOW_DEBUG') || 'off');\n\nconst diagnostic = (level, event, fields = {}) => {\n  const order = { off: 0, Basic: 1, Verbose: 2 };\n  if ((order[debugLevel] || 0) < (order[level] || 0)) return;\n  const safe = {};\n  for (const [key, value] of Object.entries(fields)) {\n    if (/token|password|secret|body|callback_url/i.test(key)) continue;\n    safe[key] = value;\n  }\n  console.log(JSON.stringify({ ts: new Date().toISOString(), level, event, ...safe }));\n};\n\nconst response = (statusCode, code, message, details = {}) => {\n  diagnostic('Basic', 'wait_zabbix_problem_status_rejected', { statusCode, code });\n  return [{ json: { valid: false, statusCode, response: { error: { code, message, ...details } } } }];\n};\n\nif (!expectedToken || actualToken !== expectedToken) {\n  return response(401, 'unauthorized', 'Токен webhook отсутствует или некорректен.');\n}\n\nconst stringValue = (value) => value === undefined || value === null ? '' : String(value).trim();\nconst numberFrom = (...values) => {\n  for (const value of values) {\n    if (value !== undefined && value !== null && value !== '') return Number(value);\n  }\n  return NaN;\n};\nconst parseHttpUrl = (raw) => {\n  const match = String(raw || '').match(/^([A-Za-z][A-Za-z0-9+.-]*):\\/\\/([^/?#]*)([^?#]*)?(?:\\?[^#]*)?(?:#.*)?$/);\n  if (!match) return null;\n  const protocol = match[1].toLowerCase() + ':';\n  const authority = match[2] || '';\n  const pathname = match[3] || '/';\n  if (!authority) return null;\n  const atIndex = authority.lastIndexOf('@');\n  const hasCredentials = atIndex !== -1;\n  const hostPort = hasCredentials ? authority.slice(atIndex + 1) : authority;\n  if (!hostPort) return null;\n  let hostname = '';\n  let originHost = hostPort;\n  if (hostPort.startsWith('[')) {\n    const end = hostPort.indexOf(']');\n    if (end <= 1) return null;\n    hostname = hostPort.slice(1, end);\n    const portPart = hostPort.slice(end + 1);\n    if (portPart && !/^:\\d{1,5}$/.test(portPart)) return null;\n    originHost = '[' + hostname.toLowerCase() + ']' + portPart;\n  } else {\n    if (hostPort.includes('[') || hostPort.includes(']')) return null;\n    const parts = hostPort.split(':');\n    if (parts.length > 2) return null;\n    hostname = parts[0];\n    if (!hostname) return null;\n    if (parts[1] !== undefined && !/^\\d{1,5}$/.test(parts[1])) return null;\n    originHost = hostname.toLowerCase() + (parts[1] !== undefined ? ':' + parts[1] : '');\n  }\n  return { protocol, hasCredentials, hostname: hostname.toLowerCase(), origin: protocol + '//' + originHost, pathname };\n};\nconst validateCallbackUrl = (value) => {\n  const raw = stringValue(value);\n  const parsed = parseHttpUrl(raw);\n  if (!parsed) return { reason: 'invalid_url' };\n  if (!['http:', 'https:'].includes(parsed.protocol)) return { reason: 'invalid_scheme' };\n  if (parsed.hasCredentials) return { reason: 'credentials_not_allowed' };\n  const envName = stringValue(envValue('NODE_ENV') || envValue('N8N_ENVIRONMENT') || envValue('ENVIRONMENT')).toLowerCase();\n  const localEnv = !envName || envName === 'development' || envName === 'dev' || envName === 'local' || envName === 'test';\n  const production = envName === 'production' || envName === 'prod';\n  const hostname = parsed.hostname.toLowerCase();\n  const localHttp = parsed.protocol === 'http:' && (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || (!hostname.includes('.') && !/^[0-9.]+$/.test(hostname)));\n  const orchestratorBase = stringValue(envValue('ORCHESTRATOR_PUBLIC_URL'));\n  if (!orchestratorBase && !localEnv && !localHttp) return { reason: 'missing_orchestrator_public_url' };\n  if (orchestratorBase) {\n    const base = parseHttpUrl(orchestratorBase);\n    if (!base || base.hasCredentials) return { reason: 'invalid_orchestrator_public_url' };\n    const basePath = base.pathname.replace(/\\/+$/, '');\n    if (parsed.origin !== base.origin || (basePath && parsed.pathname !== basePath && !parsed.pathname.startsWith(basePath + '/'))) {\n      return { reason: 'outside_orchestrator_public_url' };\n    }\n  }\n  if (parsed.protocol !== 'https:' && !(localHttp && !production)) return { reason: 'https_required' };\n  return null;\n};\n\nconst problemUrl = stringValue(body.problemUrl || body.problem_url);\nconst pollIntervalMinutes = numberFrom(body.poll_interval_minutes, body.pollIntervalMinutes);\nconst timeoutMinutes = numberFrom(body.timeout_minutes, body.timeoutMinutes);\n\nif (!problemUrl) return response(400, 'missing_problem_url', 'Поле problemUrl обязательно.');\nif (!Number.isInteger(pollIntervalMinutes) || pollIntervalMinutes < 1 || pollIntervalMinutes > 60) {\n  return response(400, 'invalid_poll_interval_minutes', 'poll_interval_minutes должен быть целым числом от 1 до 60.');\n}\nif (!Number.isInteger(timeoutMinutes) || timeoutMinutes < 1 || timeoutMinutes > 240) {\n  return response(400, 'invalid_timeout_minutes', 'timeout_minutes должен быть целым числом от 1 до 240.');\n}\nif (pollIntervalMinutes > timeoutMinutes) {\n  return response(400, 'poll_interval_exceeds_timeout', 'poll_interval_minutes не должен быть больше timeout_minutes.');\n}\n\nconst invocation = body.invocation && typeof body.invocation === 'object' ? body.invocation : {};\nconst asyncCallback = invocation.extensions?.async_callback && typeof invocation.extensions.async_callback === 'object'\n  ? invocation.extensions.async_callback\n  : null;\nif (!asyncCallback) return response(400, 'missing_async_callback', 'Для этого ранбука обязателен invocation.extensions.async_callback.');\n\nconst actionId = stringValue(invocation.action_id || 'wait_zabbix_problem_status');\nif (actionId !== 'wait_zabbix_problem_status') {\n  return response(400, 'invalid_action_id', 'Для этого endpoint action_id должен быть wait_zabbix_problem_status.', { action_id: actionId });\n}\n\nconst requiredAsync = ['source', 'case_id', 'wait_id', 'correlation_id', 'event_type', 'idempotency_key_base', 'result_transport'];\nconst missingAsync = requiredAsync.filter((name) => !stringValue(asyncCallback[name]));\nif (missingAsync.length) {\n  return response(400, 'missing_async_callback_fields', 'Не указаны обязательные поля async_callback.', { missing_fields: missingAsync });\n}\nconst transport = stringValue(asyncCallback.result_transport);\nif (!['http_callback', 'kafka_event', 'both'].includes(transport)) {\n  return response(400, 'invalid_result_transport', 'result_transport должен быть http_callback, kafka_event или both.', { result_transport: transport });\n}\nif ((transport === 'http_callback' || transport === 'both') && !stringValue(asyncCallback.callback_url)) {\n  return response(400, 'missing_callback_url', 'callback_url обязателен для http_callback или both.');\n}\nif (transport === 'http_callback' || transport === 'both') {\n  const callbackError = validateCallbackUrl(asyncCallback.callback_url);\n  if (callbackError) return response(400, 'invalid_callback_url', 'callback_url не соответствует политике безопасности.', callbackError);\n}\nif ((transport === 'kafka_event' || transport === 'both') && !stringValue(asyncCallback.result_topic)) {\n  return response(400, 'missing_result_topic', 'result_topic обязателен для kafka_event или both.');\n}\n\nconst rawInternalBase = stringValue(\n  (typeof $env !== 'undefined' && ($env.N8N_INTERNAL_WEBHOOK_BASE_URL || $env.N8N_WEBHOOK_BASE_URL))\n    || (typeof process !== 'undefined' && (process.env.N8N_INTERNAL_WEBHOOK_BASE_URL || process.env.N8N_WEBHOOK_BASE_URL))\n    || 'http://127.0.0.1:5678/webhook'\n);\nif (!/^https?:\\/\\/[^?#]+$/i.test(rawInternalBase)) {\n  return response(500, 'invalid_internal_webhook_base_url', 'N8N_INTERNAL_WEBHOOK_BASE_URL должен быть http/https URL без query/fragment.');\n}\nconst internalWebhookBaseUrl = rawInternalBase.replace(/\\/+$/, '');\n\nconst now = new Date();\nconst deadline = new Date(now.getTime() + timeoutMinutes * 60 * 1000);\nconst invocationId = stringValue(invocation.invocation_id || body.request_id || body.requestId || ('zabbix-wait-' + Date.now()));\n\nconst acceptedResponse = {\n  runbook_status: 'accepted',\n  message: 'n8n Zabbix wait runbook принял запрос.',\n  invocation_id: invocationId,\n  action_id: actionId,\n  accepted_at: now.toISOString(),\n  async_delivery: true,\n  correlation_id: asyncCallback.correlation_id,\n  wait_id: asyncCallback.wait_id,\n  result_transport: transport,\n  result_topic: asyncCallback.result_topic || null,\n  has_callback_url: Boolean(asyncCallback.callback_url)\n};\n\ndiagnostic('Basic', 'wait_zabbix_problem_status_accepted', {\n  invocation_id: invocationId,\n  poll_interval_minutes: pollIntervalMinutes,\n  timeout_minutes: timeoutMinutes\n});\n\nreturn [{\n  json: {\n    valid: true,\n    statusCode: 200,\n    response: acceptedResponse,\n    invocation_id: invocationId,\n    action_id: actionId,\n    problemUrl,\n    poll_interval_minutes: pollIntervalMinutes,\n    timeout_minutes: timeoutMinutes,\n    poll_seconds: pollIntervalMinutes * 60,\n    started_at: now.toISOString(),\n    deadline_at: deadline.toISOString(),\n    async_callback: asyncCallback,\n    internal_webhook_base_url: internalWebhookBaseUrl\n  }\n}];"
+      },
+      "id": "wait-zabbix-problem-prepare",
+      "name": "Подготовка запроса ожидания Zabbix",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.valid }}",
+              "operation": "equal",
+              "value2": true
+            }
+          ]
+        },
+        "combineOperation": "all"
+      },
+      "id": "wait-zabbix-problem-valid",
+      "name": "Запрос валиден?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        800,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}"
+        }
+      },
+      "id": "wait-zabbix-problem-validation-error",
+      "name": "Ответ ошибки валидации",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1080,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}"
+        }
+      },
+      "id": "wait-zabbix-problem-accepted",
+      "name": "Ответ accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1080,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const state = $input.first().json || {};\nconst httpRequest = this?.helpers?.httpRequest?.bind(this.helpers);\nif (!httpRequest) throw new Error('n8n httpRequest helper is not available in Code node.');\n\nconst safeMessage = (error) => String(error?.message || error || 'unknown_error').replace(/token|password|secret|authorization/ig, '[redacted]');\nconst now = new Date();\nconst deadline = new Date(state.deadline_at);\nconst internalToken = (typeof $env !== 'undefined' && $env.N8N_WEBHOOK_TOKEN) || (typeof process !== 'undefined' && process.env.N8N_WEBHOOK_TOKEN) || '';\n\nconst terminal = (status, message, extra = {}) => ({\n  ...state,\n  ...extra,\n  terminal: true,\n  response: {\n    status,\n    timed_out: Boolean(extra.timed_out),\n    message,\n    problemUrl: state.problemUrl,\n    zabbix_status: extra.zabbix_status || state.zabbix_status || null,\n    error: extra.error || null,\n    started_at: state.started_at,\n    finished_at: new Date().toISOString(),\n    poll_interval_minutes: Number(state.poll_interval_minutes),\n    timeout_minutes: Number(state.timeout_minutes)\n  }\n});\n\nif (!internalToken) {\n  return [{\n    json: terminal('ERROR', 'N8N_WEBHOOK_TOKEN не настроен для internal webhook call.', {\n      error: { code: 'missing_internal_webhook_token', message: 'N8N_WEBHOOK_TOKEN не настроен для internal webhook call.' }\n    })\n  }];\n}\n\nlet zabbixStatus;\ntry {\n  zabbixStatus = await httpRequest({\n    method: 'POST',\n    url: state.internal_webhook_base_url + '/zabbix/problem/status',\n    headers: {\n      'Content-Type': 'application/json',\n      'X-ServiceDesk-Token': internalToken\n    },\n    body: { problemUrl: state.problemUrl },\n    json: true\n  });\n} catch (error) {\n  return [{\n    json: terminal('ERROR', 'Не удалось проверить статус Zabbix problem.', {\n      error: { code: 'zabbix_status_failed', message: 'Не удалось проверить статус Zabbix problem.', reason: safeMessage(error) }\n    })\n  }];\n}\n\nconst status = String(zabbixStatus?.status || '');\nif (!['problem', 'resolved', 'ok'].includes(status)) {\n  return [{\n    json: terminal('ERROR', 'Endpoint статуса Zabbix вернул некорректное состояние.', {\n      zabbix_status: zabbixStatus || null,\n      error: { code: 'invalid_zabbix_status_response', message: 'Endpoint статуса Zabbix вернул некорректное состояние.' }\n    })\n  }];\n}\n\nconst nextState = { ...state, terminal: false, zabbix_status: zabbixStatus };\nif (status === 'ok' || status === 'resolved') {\n  return [{ json: terminal(status, 'Zabbix problem перешел в ok/resolved.', { zabbix_status: zabbixStatus, timed_out: false }) }];\n}\n\nif (now >= deadline) {\n  return [{ json: terminal('problem', 'Zabbix problem остался в состоянии problem до timeout.', { zabbix_status: zabbixStatus, timed_out: true }) }];\n}\n\nconst secondsUntilDeadline = Math.max(0, Math.ceil((deadline.getTime() - now.getTime()) / 1000));\nconst pollSeconds = Number(state.poll_seconds || 60);\nconst nextWaitSeconds = Math.max(1, Math.min(pollSeconds, secondsUntilDeadline || pollSeconds));\nconst nextWaitAt = new Date(now.getTime() + nextWaitSeconds * 1000).toISOString();\nreturn [{ json: { ...nextState, next_wait_seconds: nextWaitSeconds, next_wait_at: nextWaitAt } }];"
+      },
+      "id": "wait-zabbix-problem-check",
+      "name": "Проверка статуса Zabbix",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.terminal }}",
+              "operation": "equal",
+              "value2": true
+            }
+          ]
+        },
+        "combineOperation": "all"
+      },
+      "id": "wait-zabbix-problem-terminal",
+      "name": "Zabbix ожидание завершено?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1640,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "resume": "specificTime",
+        "dateTime": "={{ $json.next_wait_at }}"
+      },
+      "id": "wait-zabbix-problem-wait",
+      "name": "Ожидание следующего опроса",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1920,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json || {};\nconst response = input.response || {};\nconst asyncCallback = input.async_callback;\nif (!asyncCallback) throw new Error('async_callback is required for async result delivery.');\n\nconst normalizeSource = (value) => String(value || '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').toUpperCase();\nconst transport = String(asyncCallback.result_transport || '');\nconst resultStatus = String(response.status || 'ERROR');\nconst externalStatus = resultStatus === 'ERROR'\n  ? 'error'\n  : (response.timed_out ? 'timeout' : 'success');\nconst eventSuffix = response.timed_out ? resultStatus + '_timeout' : resultStatus;\nconst shouldPublishKafka = transport === 'kafka_event' || transport === 'both';\nconst deliveryStatus = {\n  requested_transport: transport,\n  http_callback: (transport === 'http_callback' || transport === 'both') ? 'pending' : 'not_requested',\n  kafka_event: shouldPublishKafka ? 'pending' : 'not_requested'\n};\nconst externalEvent = {\n  schema_version: '1.0',\n  event_id: asyncCallback.idempotency_key_base + ':zabbix_problem_wait_' + eventSuffix,\n  case_id: asyncCallback.case_id,\n  wait_id: asyncCallback.wait_id,\n  correlation_id: asyncCallback.correlation_id,\n  source: asyncCallback.source,\n  event_type: asyncCallback.event_type,\n  status: externalStatus,\n  idempotency_key: asyncCallback.idempotency_key_base + ':zabbix_problem_wait_' + eventSuffix,\n  result: {\n    action_id: input.action_id || 'wait_zabbix_problem_status',\n    invocation_id: input.invocation_id,\n    ...response,\n    delivery_status: deliveryStatus\n  }\n};\n\nif (transport === 'http_callback' || transport === 'both') {\n  const sourceKey = normalizeSource(asyncCallback.source);\n  const token = (typeof $env !== 'undefined' && ($env['INTEGRATION_CALLBACK_TOKEN__' + sourceKey] || $env.INTEGRATION_CALLBACK_TOKEN))\n    || (typeof process !== 'undefined' && (process.env['INTEGRATION_CALLBACK_TOKEN__' + sourceKey] || process.env.INTEGRATION_CALLBACK_TOKEN))\n    || '';\n  if (!token) {\n    deliveryStatus.http_callback = 'failed';\n    deliveryStatus.http_callback_error = 'missing_callback_token';\n    if (!shouldPublishKafka) throw new Error('missing_callback_token');\n  }\n  const httpRequest = this?.helpers?.httpRequest?.bind(this.helpers);\n  if (token && !httpRequest) {\n    deliveryStatus.http_callback = 'failed';\n    deliveryStatus.http_callback_error = 'http_request_helper_unavailable';\n    if (!shouldPublishKafka) throw new Error('n8n httpRequest helper is not available in Code node.');\n  }\n  if (token && httpRequest) {\n    try {\n      await httpRequest({\n        method: 'POST',\n        url: asyncCallback.callback_url,\n        headers: {\n          'Content-Type': 'application/json',\n          'X-ServiceDesk-Callback-Token': token\n        },\n        body: externalEvent,\n        json: true\n      });\n      deliveryStatus.http_callback = 'sent';\n    } catch (error) {\n      deliveryStatus.http_callback = 'failed';\n      deliveryStatus.http_callback_error = 'callback_delivery_failed';\n      if (!shouldPublishKafka) throw new Error('callback_delivery_failed');\n    }\n  }\n}\n\nreturn [{\n  json: {\n    ...input,\n    externalEvent,\n    shouldPublishKafka,\n    delivery_status: deliveryStatus,\n    kafkaTopic: asyncCallback.result_topic || '',\n    kafkaHeaders: JSON.stringify({\n      correlation_id: asyncCallback.correlation_id,\n      wait_id: asyncCallback.wait_id,\n      idempotency_key: externalEvent.idempotency_key,\n      event_type: asyncCallback.event_type\n    })\n  }\n}];"
+      },
+      "id": "wait-zabbix-problem-deliver-result",
+      "name": "Доставка async результата",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.shouldPublishKafka }}",
+              "operation": "equal",
+              "value2": true
+            }
+          ]
+        },
+        "combineOperation": "all"
+      },
+      "id": "wait-zabbix-problem-needs-kafka",
+      "name": "Нужна Kafka delivery?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        2200,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "topic": "={{ $json.kafkaTopic }}",
+        "sendInputData": false,
+        "message": "={{ JSON.stringify($json.externalEvent) }}",
+        "jsonParameters": true,
+        "useSchemaRegistry": false,
+        "useKey": true,
+        "key": "={{ $json.externalEvent.case_id }}",
+        "headerParametersJson": "={{ $json.kafkaHeaders }}",
+        "options": {
+          "acks": true,
+          "compression": false,
+          "timeout": 30000
+        }
+      },
+      "id": "wait-zabbix-problem-kafka-publish",
+      "name": "Публикация ExternalEvent в Kafka",
+      "type": "n8n-nodes-base.kafka",
+      "typeVersion": 1,
+      "position": [
+        2480,
+        -40
+      ],
+      "credentials": {
+        "kafka": {
+          "id": "localRedpandaKafka",
+          "name": "Local Redpanda Kafka"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { delivered: true, status: $input.first().json.externalEvent?.status || 'unknown' } }];"
+      },
+      "id": "wait-zabbix-problem-async-done",
+      "name": "Завершение async ветки",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2760,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Webhook ожидания Zabbix problem\n\nДелает: Принимает POST /webhook/zabbix/problem/wait с problemUrl, poll_interval_minutes, timeout_minutes и async_callback.\n\nОпирается на: Production webhook registration и caller, который передает X-ServiceDesk-Token.\n\nОшибки/ветки: До activation endpoint вернет 404; malformed body валидирует следующий Code node.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "wait-zabbix-problem-webhook-note",
+      "name": "Note: Webhook ожидания Zabbix problem",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        470
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Подготовка запроса ожидания Zabbix\n\nДелает: Валидирует auth, problemUrl, polling/timeout, async_callback, result_transport и internal webhook base URL.\n\nОпирается на: N8N_WEBHOOK_TOKEN, optional N8N_INTERNAL_WEBHOOK_BASE_URL/N8N_WEBHOOK_BASE_URL и ServiceDesk async callback contract.\n\nОшибки/ветки: Возвращает 400/401/500 для missing problemUrl, invalid poll/timeout, missing callback/topic или invalid internal URL.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "wait-zabbix-problem-prepare-note",
+      "name": "Note: Подготовка запроса ожидания Zabbix",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        520,
+        470
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Запрос валиден?\n\nДелает: Маршрутизирует валидный async request в accepted response или возвращает validation/auth error.\n\nОпирается на: Boolean valid из узла подготовки запроса.\n\nОшибки/ветки: False branch завершает HTTP request structured error без запуска polling.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "wait-zabbix-problem-valid-note",
+      "name": "Note: Запрос валиден?",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        800,
+        470
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Ответ ошибки валидации\n\nДелает: Возвращает caller-у validation/auth error.\n\nОпирается на: statusCode/response из узла подготовки запроса.\n\nОшибки/ветки: Неверная response shape нарушит OpenAPI error contract.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "wait-zabbix-problem-validation-error-note",
+      "name": "Note: Ответ ошибки валидации",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1080,
+        650
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Ответ accepted\n\nДелает: Сразу отвечает caller-у accepted и освобождает HTTP request.\n\nОпирается на: Accepted response с correlation_id, wait_id и result_transport из async_callback.\n\nОшибки/ветки: После этого terminal result доставляется только через callback/Kafka.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "wait-zabbix-problem-accepted-note",
+      "name": "Note: Ответ accepted",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1080,
+        330
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Проверка статуса Zabbix\n\nДелает: Вызывает internal Zabbix problem status endpoint и определяет terminal или wait состояние.\n\nОпирается на: Активный workflow getZabbixProblemStatus, N8N_WEBHOOK_TOKEN, Zabbix registry env и problemUrl из запроса.\n\nОшибки/ветки: Zabbix status failure или неожиданный status превращается в terminal ERROR ExternalEvent.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "wait-zabbix-problem-check-note",
+      "name": "Note: Проверка статуса Zabbix",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1360,
+        330
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Zabbix ожидание завершено?\n\nДелает: Разделяет terminal result ok/resolved/problem-timeout/ERROR и повторный polling.\n\nОпирается на: Boolean terminal из узла проверки статуса Zabbix.\n\nОшибки/ветки: False branch уходит в Wait loop; true branch доставляет ExternalEvent.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "wait-zabbix-problem-terminal-note",
+      "name": "Note: Zabbix ожидание завершено?",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1640,
+        330
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Ожидание следующего опроса\n\nДелает: Приостанавливает execution до следующего опроса Zabbix.\n\nОпирается на: next_wait_at ISO timestamp из узла проверки статуса Zabbix; next_wait_seconds остается диагностическим полем.\n\nОшибки/ветки: Если n8n wait/resume runtime некорректен, long-running execution может не продолжиться.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "wait-zabbix-problem-wait-note",
+      "name": "Note: Ожидание следующего опроса",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1920,
+        490
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Доставка async результата\n\nДелает: Формирует canonical ExternalEvent, при необходимости отправляет HTTP callback и заполняет delivery_status.\n\nОпирается на: async_callback, INTEGRATION_CALLBACK_TOKEN env и this.helpers.httpRequest для callback.\n\nОшибки/ветки: Для result_transport=both callback failure не блокирует Kafka publish; для чистого http_callback missing_callback_token/callback_delivery_failed приводят к failed execution.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "wait-zabbix-problem-deliver-result-note",
+      "name": "Note: Доставка async результата",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1920,
+        210
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Нужна Kafka delivery?\n\nДелает: Проверяет, нужен ли publish ExternalEvent в Kafka.\n\nОпирается на: shouldPublishKafka из узла доставки async результата.\n\nОшибки/ветки: False branch завершает workflow после HTTP callback или no-Kafka delivery.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "wait-zabbix-problem-needs-kafka-note",
+      "name": "Note: Нужна Kafka delivery?",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2200,
+        210
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Публикация ExternalEvent в Kafka\n\nДелает: Публикует canonical ExternalEvent в result_topic с correlation headers.\n\nОпирается на: Kafka credential Local Redpanda Kafka и result_topic из async_callback.\n\nОшибки/ветки: Kafka broker/credential/topic ошибки приведут к failed execution и отсутствию Kafka event.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "wait-zabbix-problem-kafka-publish-note",
+      "name": "Note: Публикация ExternalEvent в Kafka",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2480,
+        130
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Завершение async ветки\n\nДелает: Завершает execution после успешной callback/Kafka delivery.\n\nОпирается на: Успешную доставку ExternalEvent или отсутствие выбранной Kafka ветки.\n\nОшибки/ветки: Не выполняется при failed callback или Kafka publish.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "wait-zabbix-problem-async-done-note",
+      "name": "Note: Завершение async ветки",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2760,
+        210
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook ожидания Zabbix problem": {
+      "main": [
+        [
+          {
+            "node": "Подготовка запроса ожидания Zabbix",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Подготовка запроса ожидания Zabbix": {
+      "main": [
+        [
+          {
+            "node": "Запрос валиден?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Запрос валиден?": {
+      "main": [
+        [
+          {
+            "node": "Ответ accepted",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ответ ошибки валидации",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ответ accepted": {
+      "main": [
+        [
+          {
+            "node": "Проверка статуса Zabbix",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Проверка статуса Zabbix": {
+      "main": [
+        [
+          {
+            "node": "Zabbix ожидание завершено?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zabbix ожидание завершено?": {
+      "main": [
+        [
+          {
+            "node": "Доставка async результата",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ожидание следующего опроса",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ожидание следующего опроса": {
+      "main": [
+        [
+          {
+            "node": "Проверка статуса Zabbix",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Доставка async результата": {
+      "main": [
+        [
+          {
+            "node": "Нужна Kafka delivery?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Нужна Kafka delivery?": {
+      "main": [
+        [
+          {
+            "node": "Публикация ExternalEvent в Kafka",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Завершение async ветки",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Публикация ExternalEvent в Kafka": {
+      "main": [
+        [
+          {
+            "node": "Завершение async ветки",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false
+  },
+  "description": "Логика работы: асинхронно ожидает, пока Zabbix problem по UI URL перейдет в ok или resolved, либо пока истечет timeout.\n\nWorkflow валидирует token и async_callback, сразу возвращает accepted, затем в цикле вызывает internal getZabbixProblemStatus endpoint и доставляет terminal ExternalEvent.\n\nОтладка: включить N8N_WORKFLOW_DEBUG=Basic, проверить активный workflow getZabbixProblemStatus, Zabbix registry env, Kafka/callback delivery и выполнить auth-negative, validation-negative, short-timeout smoke."
+}

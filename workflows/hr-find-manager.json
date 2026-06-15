@@ -1,17 +1,19 @@
 {
-  "name": "HR: Поиск руководителя по ФИО и табельному номеру",
+  "id": "verifyEmployeeManager",
+  "name": "HR: проверка заявленного руководителя",
   "nodes": [
     {
       "parameters": {
         "httpMethod": "POST",
-        "path": "hr/find-manager",
+        "path": "hr/verify-manager",
         "responseMode": "responseNode",
         "options": {}
       },
-      "id": "hr-find-manager-webhook",
-      "name": "Webhook запроса",
+      "id": "hr-verify-manager-webhook",
+      "name": "Webhook проверки руководителя",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
+      "webhookId": "9a6312b1-bdf0-4fa6-9849-3e48d83ee685",
       "position": [
         240,
         300
@@ -19,10 +21,10 @@
     },
     {
       "parameters": {
-        "jsCode": "const input = $input.first().json;\nconst body = input.body || {};\n\nconst fullName = String(body.full_name || '').trim();\nconst employeeId = String(body.employee_id || '').trim();\n\nif (!fullName) {\n  return [{\n    json: {\n      statusCode: 400,\n      response: {\n        error: { code: 'missing_full_name', message: 'full_name (ФИО) обязателен.' }\n      }\n    }\n  }];\n}\n\nconst parts = fullName.split(/\\s+/);\nreturn [{\n  json: {\n    statusCode: 200,\n    full_name: fullName,\n    employee_id: employeeId,\n    last_name: parts[0] || '',\n    first_name: parts[1] || '',\n    middle_name: parts[2] || '',\n    hr_api_base_url: process.env.HR_API_BASE_URL || 'https://hr-api.example.com'\n  }\n}];"
+        "jsCode": "const input = $input.first().json || {};\nconst headers = input.headers || {};\nconst body = input.body && typeof input.body === 'object' ? input.body : {};\nconst env = typeof $env !== 'undefined' ? $env : {};\nconst envValue = (name) => env[name] || (typeof process !== 'undefined' ? process.env[name] : '') || '';\nconst expectedToken = envValue('N8N_WEBHOOK_TOKEN');\nconst actualToken = headers['x-servicedesk-token'] || headers['X-ServiceDesk-Token'] || headers['X-Servicedesk-Token'] || '';\nconst debugLevel = String(envValue('N8N_WORKFLOW_DEBUG') || 'off');\n\nfunction diagnostic(level, event, fields = {}) {\n  const order = { off: 0, Basic: 1, Verbose: 2 };\n  if ((order[debugLevel] || 0) < (order[level] || 0)) return;\n  const safe = {};\n  for (const [key, value] of Object.entries(fields)) {\n    if (/token|password|secret|authorization|full_name|name|person|employee/i.test(key)) continue;\n    safe[key] = value;\n  }\n  console.log(JSON.stringify({ ts: new Date().toISOString(), level, event, ...safe }));\n}\n\nfunction response(statusCode, code, message, details = {}) {\n  diagnostic('Basic', 'hr_verify_manager_rejected', { statusCode, code });\n  return [{ json: { valid: false, statusCode, response: { error: { code, message, ...details } } } }];\n}\n\nfunction stringValue(...values) {\n  for (const value of values) {\n    if (value !== undefined && value !== null && String(value).trim()) return String(value).trim();\n  }\n  return '';\n}\n\nfunction normalizeName(value) {\n  return String(value || '').replace(/\\s+/g, ' ').trim();\n}\n\nfunction parseLegalEntities(value) {\n  if (value === undefined || value === null || value === '') return [];\n  const raw = Array.isArray(value) ? value : String(value).split(',');\n  const result = raw.map((item) => String(item || '').trim()).filter(Boolean);\n  return Array.from(new Set(result));\n}\n\nfunction hasControlChars(value) {\n  return /[\\u0000-\\u001f\\u007f]/.test(value);\n}\n\nfunction parseBaseUrl(value) {\n  const raw = String(value || '').trim().replace(/\\/+$/, '');\n  if (!raw) return null;\n  if (!/^https?:\\/\\/[^/?#]+(?:\\/[^?#]*)?$/i.test(raw)) return null;\n  return raw;\n}\n\nif (!expectedToken || actualToken !== expectedToken) {\n  return response(401, 'unauthorized', 'Токен webhook отсутствует или некорректен.');\n}\n\nconst employeeFullName = normalizeName(stringValue(body.employee_full_name, body.employeeFullName));\nconst claimedManagerFullName = normalizeName(stringValue(body.claimed_manager_full_name, body.claimedManagerFullName));\nif (!employeeFullName) return response(400, 'missing_employee_full_name', 'Поле employee_full_name обязательно.');\nif (!claimedManagerFullName) return response(400, 'missing_claimed_manager_full_name', 'Поле claimed_manager_full_name обязательно.');\nif (employeeFullName.length > 300 || claimedManagerFullName.length > 300) {\n  return response(400, 'full_name_too_long', 'ФИО не должно превышать 300 символов.');\n}\nif (hasControlChars(employeeFullName) || hasControlChars(claimedManagerFullName)) {\n  return response(400, 'invalid_full_name', 'ФИО не должно содержать управляющие символы.');\n}\n\nconst relationType = stringValue(body.relation_type, body.relationType) || 'both';\nif (!['administrative', 'managerial', 'both'].includes(relationType)) {\n  return response(400, 'invalid_relation_type', 'relation_type должен быть administrative, managerial или both.', { relation_type: relationType });\n}\n\nconst legalEntities = parseLegalEntities(body.legal_entities ?? body.legalEntities);\nif (legalEntities.length > 50) {\n  return response(400, 'too_many_legal_entities', 'legal_entities содержит слишком много значений.');\n}\n\nconst hrApiBaseUrl = parseBaseUrl(envValue('HR_API_BASE_URL'));\nif (!hrApiBaseUrl) {\n  return response(500, 'missing_hr_api_base_url', 'HR_API_BASE_URL должен быть http/https URL без query/fragment.');\n}\n\ndiagnostic('Basic', 'hr_verify_manager_accepted', { relation_type: relationType, legal_entity_count: legalEntities.length });\n\nreturn [{\n  json: {\n    valid: true,\n    statusCode: 200,\n    employee_full_name: employeeFullName,\n    claimed_manager_full_name: claimedManagerFullName,\n    employee_name_key: employeeFullName.toLocaleLowerCase('ru-RU'),\n    claimed_manager_name_key: claimedManagerFullName.toLocaleLowerCase('ru-RU'),\n    relation_type: relationType,\n    legal_entities: legalEntities,\n    hr_api_base_url: hrApiBaseUrl,\n    positions_hired_body: {\n      legalEntities,\n      onlyFullDefined: true,\n      withDuplicateEmployees: true\n    },\n    orgstructure_body: {\n      legalEntities\n    }\n  }\n}];"
       },
-      "id": "hr-validate-input",
-      "name": "Валидация входных данных",
+      "id": "hr-verify-manager-prepare",
+      "name": "Подготовка запроса HR",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -32,131 +34,573 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.valid }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "hr-verify-manager-valid",
+      "name": "Запрос валиден?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        780,
+        300
+      ]
+    },
+    {
+      "parameters": {
         "method": "POST",
-        "url": "={{ $json.hr_api_base_url }}/Positions.Hired",
+        "url": "={{ $json.hr_api_base_url + \"/Positions.Hired\" }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        },
         "sendBody": true,
         "contentType": "json",
-        "body": {
-          "legalEntities": [],
-          "onlyFullDefined": true,
-          "withDuplicateEmployees": false
-        },
-        "options": {}
+        "body": "={{ $json.positions_hired_body }}"
       },
-      "id": "hr-positions-hired",
-      "name": "Загрузка сотрудников",
+      "id": "hr-verify-manager-positions-hired",
+      "name": "Загрузка активных назначений",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [
-        800,
+        1040,
+        200
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hrApiHeaderAuth",
+          "name": "HR API Header Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const positionsResponse = $input.first().json || {};\nconst requestState = $('Подготовка запроса HR').first().json || {};\n\nfunction bodyOf(value) {\n  return value && typeof value.body === 'object' ? value.body : value;\n}\n\nfunction statusOf(value) {\n  return Number(value?.statusCode || 200);\n}\n\nfunction rowsOf(value) {\n  const body = bodyOf(value);\n  if (Array.isArray(body)) return body;\n  if (Array.isArray(body?.data)) return body.data;\n  if (Array.isArray(body?.items)) return body.items;\n  return [];\n}\n\nfunction error(statusCode, code, message, details = {}) {\n  return [{ json: { ...requestState, done: true, statusCode, response: { error: { code, message, ...details } } } }];\n}\n\nconst httpStatus = statusOf(positionsResponse);\nconst body = bodyOf(positionsResponse);\nif (httpStatus >= 400 || body?.success === false) {\n  return error(502, 'hr_positions_hired_failed', 'HR API /Positions.Hired вернул ошибку.', { hr_status: httpStatus || null });\n}\n\nfunction text(value) {\n  return value === undefined || value === null ? '' : String(value).trim();\n}\n\nfunction fullNameFromPerson(personInfo = {}) {\n  return [personInfo.Last_name, personInfo.First_name, personInfo.Middle_name].map(text).filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim();\n}\n\nfunction nameKey(value) {\n  return String(value || '').replace(/\\s+/g, ' ').trim().toLocaleLowerCase('ru-RU');\n}\n\nfunction employeeKey(employee, personInfo, position) {\n  return text(employee.EmployeeGID) || text(personInfo.PersonGID) || [fullNameFromPerson(personInfo), text(position.PositionGID)].join(':');\n}\n\nconst peopleByKey = {};\nconst occupantsByPosition = {};\nconst rows = rowsOf(positionsResponse);\nfor (const legalEntityBlock of rows) {\n  const legalEntity = text(legalEntityBlock.LegalEntity);\n  for (const position of Array.isArray(legalEntityBlock.Positions) ? legalEntityBlock.Positions : []) {\n    const positionGid = text(position.PositionGID);\n    if (!positionGid) continue;\n    for (const employee of Array.isArray(position.Employees) ? position.Employees : []) {\n      const employeeInfo = employee.EmployeeInfo && typeof employee.EmployeeInfo === 'object' ? employee.EmployeeInfo : {};\n      const personInfo = employeeInfo.PersonInfo && typeof employeeInfo.PersonInfo === 'object' ? employeeInfo.PersonInfo : {};\n      const fullName = fullNameFromPerson(personInfo);\n      if (!fullName) continue;\n      const key = employeeKey(employee, personInfo, position);\n      if (!peopleByKey[key]) {\n        const employeeId = text(employee.EmployeeID || employeeInfo.EmployeeID);\n        peopleByKey[key] = {\n          key,\n          full_name: fullName,\n          name_key: nameKey(fullName),\n          employee_gid: text(employee.EmployeeGID) || null,\n          employee_id: employeeId || null,\n          employee_id_found: Boolean(employeeId),\n          person_gid: text(personInfo.PersonGID) || null,\n          state: text(employeeInfo.State) || null,\n          positions: []\n        };\n      }\n      peopleByKey[key].positions.push({\n        legal_entity: legalEntity || null,\n        position_gid: positionGid,\n        position_name: text(position.PositionName || position.Name) || null,\n        regular_position_gid: text(position.RegularPositionGID) || null,\n        org_unit_gid: text(position.OrgUnitGID) || null,\n        org_unit_name: text(position.OrgUnitName) || null,\n        org_unit_managerial_name: text(position.OrgUnitManagerialName) || null\n      });\n      occupantsByPosition[positionGid] = occupantsByPosition[positionGid] || [];\n      if (!occupantsByPosition[positionGid].includes(key)) occupantsByPosition[positionGid].push(key);\n    }\n  }\n}\n\nconst people = Object.values(peopleByKey);\nconst employeeMatches = people.filter((person) => person.name_key === requestState.employee_name_key);\nconst managerMatches = people.filter((person) => person.name_key === requestState.claimed_manager_name_key);\nconst managerEmployeeGids = Array.from(new Set(managerMatches.map((person) => person.employee_gid).filter(Boolean)));\n\nreturn [{\n  json: {\n    ...requestState,\n    done: false,\n    people,\n    people_by_key: peopleByKey,\n    occupants_by_position: occupantsByPosition,\n    employee_matches: employeeMatches,\n    manager_matches: managerMatches,\n    manager_employee_gids: managerEmployeeGids,\n    subordinates_body: {\n      EmployeeGIDs: managerEmployeeGids\n    }\n  }\n}];"
+      },
+      "id": "hr-verify-manager-build-state",
+      "name": "Подготовка набора кандидатов",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.done }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "hr-verify-manager-state-done",
+      "name": "Ответ уже готов?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1560,
         200
       ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $json.hr_api_base_url }}/Orgstructure.Administrative",
+        "url": "={{ $json.hr_api_base_url + \"/Orgstructure.Administrative\" }}",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        },
         "sendBody": true,
         "contentType": "json",
-        "body": {
-          "legalEntities": []
-        },
-        "options": {}
+        "body": "={{ $json.orgstructure_body }}"
       },
-      "id": "hr-orgstructure-admin",
-      "name": "Загрузка оргструктуры",
+      "id": "hr-verify-manager-org-admin",
+      "name": "Загрузка административной оргструктуры",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.1,
       "position": [
-        800,
-        400
-      ]
+        1820,
+        40
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hrApiHeaderAuth",
+          "name": "HR API Header Auth"
+        }
+      }
     },
     {
       "parameters": {
-        "jsCode": "const input = $input.first().json;\nconst positionsData = input.positionsHired || [];\nconst orgData = input.orgStructure || [];\nconst lastName = String(input.last_name || '').toLowerCase();\nconst firstName = String(input.first_name || '').toLowerCase();\nconst middleName = String(input.middle_name || '').toLowerCase();\nconst employeeId = String(input.employee_id || '').trim();\n\nconst employees = [];\nfor (const le of positionsData) {\n  for (const pos of le.Positions || []) {\n    for (const emp of pos.Employees || []) {\n      const pi = emp.EmployeeInfo?.PersonInfo || {};\n      employees.push({\n        employeeGid: emp.EmployeeGID,\n        lastName: pi.Last_name || '',\n        firstName: pi.First_name || '',\n        middleName: pi.Middle_name || '',\n        fullName: [pi.Last_name, pi.First_name, pi.Middle_name].filter(Boolean).join(' '),\n        positionGid: pos.PositionGID,\n        positionName: pos.PositionName,\n        orgUnitGid: pos.OrgUnitGID,\n        orgUnitName: pos.OrgUnitName,\n        legalEntity: le.LegalEntity\n      });\n    }\n  }\n}\n\nlet candidates = employees.filter(e => {\n  const ln = String(e.lastName || '').toLowerCase() === lastName;\n  const fn = !firstName || String(e.firstName || '').toLowerCase() === firstName;\n  const mn = !middleName || String(e.middleName || '').toLowerCase() === middleName;\n  return ln && fn && mn;\n});\n\nconst managerMap = {};\nfor (const le of orgData) {\n  for (const ou of le.OrgUnits || []) {\n    if (ou.ManagerPositionGID) {\n      managerMap[ou.OrgUnitGID] = {\n        managerPositionGid: ou.ManagerPositionGID,\n        orgUnitName: ou.Name\n      };\n    }\n  }\n}\n\nconst results = [];\nfor (const cand of candidates) {\n  const orgInfo = managerMap[cand.orgUnitGid];\n  let manager = null;\n  let managerCandidates = [];\n  if (orgInfo) {\n    managerCandidates = employees.filter(e => e.positionGid === orgInfo.managerPositionGid);\n    if (managerCandidates.length === 1) {\n      manager = managerCandidates[0]; }\n  }\n  results.push({\n    employeeGid: cand.employeeGid,\n    fullName: cand.fullName,\n    positionName: cand.positionName,\n    orgUnitName: cand.orgUnitName,\n    legalEntity: cand.legalEntity,\n    managerFullName: manager ? manager.fullName : null,\n    managerPositionName: manager ? manager.positionName : null,\n    managerCandidates: managerCandidates.map(m => ({\n      employeeGid: m.employeeGid,\n      fullName: m.fullName,\n      positionName: m.positionName\n    })),\n    ambiguityWarning: managerCandidates.length > 1 ? 'Найдено несколько сотрудников на должности руководителя.' : null\n  });\n}\n\nreturn [{\n  json: {\n    statusCode: 200,\n    query: {\n      full_name: input.full_name,\n      employee_id: employeeId,\n      last_name: input.last_name,\n      first_name: input.first_name,\n      middle_name: input.middle_name\n    },\n    candidatesFound: candidates.length,\n    candidates: results,\n    note: employeeId ? 'Фильтрация по табельному номеру требует доработки: EmployeeID отсутствует в /Positions.Hired, доступен только через /Employee.Subordinates.Administrative после получения EmployeeGID.' : null\n  }\n}];"
+        "method": "GET",
+        "url": "={{ $json.hr_api_base_url + \"/Orgstructure.Managerial\" }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
       },
-      "id": "hr-find-manager-logic",
-      "name": "Поиск руководителя",
+      "id": "hr-verify-manager-org-managerial",
+      "name": "Загрузка управленческой оргструктуры",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2080,
+        40
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hrApiHeaderAuth",
+          "name": "HR API Header Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.hr_api_base_url + \"/Employee.Subordinates.Administrative\" }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ $json.subordinates_body }}"
+      },
+      "id": "hr-verify-manager-sub-admin",
+      "name": "Загрузка административных подчиненных",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2340,
+        40
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hrApiHeaderAuth",
+          "name": "HR API Header Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.hr_api_base_url + \"/Employee.Subordinates.Managerial\" }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ $json.subordinates_body }}"
+      },
+      "id": "hr-verify-manager-sub-managerial",
+      "name": "Загрузка управленческих подчиненных",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2600,
+        40
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "hrApiHeaderAuth",
+          "name": "HR API Header Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const state = $('Подготовка набора кандидатов').first().json || {};\nconst adminOrgResponse = $('Загрузка административной оргструктуры').first().json || {};\nconst managerialOrgResponse = $('Загрузка управленческой оргструктуры').first().json || {};\nconst adminSubResponse = $('Загрузка административных подчиненных').first().json || {};\nconst managerialSubResponse = $('Загрузка управленческих подчиненных').first().json || {};\n\nif (state.done) {\n  return [{ json: { statusCode: state.statusCode || 500, response: state.response || { error: { code: 'invalid_state', message: 'Некорректное состояние workflow.' } } } }];\n}\n\nfunction bodyOf(value) {\n  return value && typeof value.body === 'object' ? value.body : value;\n}\n\nfunction statusOf(value) {\n  return Number(value?.statusCode || 200);\n}\n\nfunction rowsOf(value) {\n  const body = bodyOf(value);\n  if (Array.isArray(body)) return body;\n  if (Array.isArray(body?.data)) return body.data;\n  if (Array.isArray(body?.items)) return body.items;\n  return [];\n}\n\nfunction text(value) {\n  return value === undefined || value === null ? '' : String(value).trim();\n}\n\nfunction needs(type) {\n  return state.relation_type === type || state.relation_type === 'both';\n}\n\nfunction technicalError(code, message, details = {}) {\n  return [{ json: { statusCode: 502, response: { error: { code, message, ...details } } } }];\n}\n\nfunction businessError(code, message, extra = {}) {\n  return [{\n    json: {\n      statusCode: 200,\n      response: {\n        status: 'ERROR',\n        error_code: code,\n        message,\n        relation_type_requested: state.relation_type,\n        employee_matches: summarizePeople(state.employee_matches || []),\n        manager_matches: summarizePeople(state.manager_matches || []),\n        checked_pairs: [],\n        ...extra\n      }\n    }\n  }];\n}\n\nfunction summarizePerson(person) {\n  return {\n    full_name: person?.full_name || '',\n    employee_gid: person?.employee_gid || null,\n    employee_id: person?.employee_id || null,\n    employee_id_found: Boolean(person?.employee_id),\n    person_gid: person?.person_gid || null,\n    positions: Array.isArray(person?.positions) ? person.positions.map((position) => ({\n      legal_entity: position.legal_entity || null,\n      position_gid: position.position_gid || null,\n      position_name: position.position_name || null,\n      org_unit_gid: position.org_unit_gid || null,\n      org_unit_name: position.org_unit_name || null,\n      org_unit_managerial_name: position.org_unit_managerial_name || null\n    })) : []\n  };\n}\n\nfunction summarizePeople(people) {\n  return people.map(summarizePerson);\n}\n\nfunction collectEmployeeIds(...responses) {\n  const result = {};\n  for (const response of responses) {\n    if (statusOf(response) >= 400) continue;\n    for (const managerEntry of rowsOf(response)) {\n      for (const position of Array.isArray(managerEntry.Positions) ? managerEntry.Positions : []) {\n        for (const subordinate of Array.isArray(position.Subordinates) ? position.Subordinates : []) {\n          for (const employee of Array.isArray(subordinate.Employees) ? subordinate.Employees : []) {\n            const employeeGid = text(employee.EmployeeGID);\n            const employeeId = text(employee.EmployeeID);\n            if (employeeGid && employeeId) result[employeeGid] = employeeId;\n          }\n        }\n      }\n    }\n  }\n  return result;\n}\n\nconst employeeIds = collectEmployeeIds(adminSubResponse, managerialSubResponse);\nfor (const person of Object.values(state.people_by_key || {})) {\n  if (!person.employee_id && person.employee_gid && employeeIds[person.employee_gid]) {\n    person.employee_id = employeeIds[person.employee_gid];\n    person.employee_id_found = true;\n  }\n}\nstate.employee_matches = (state.employee_matches || []).map((person) => state.people_by_key[person.key] || person);\nstate.manager_matches = (state.manager_matches || []).map((person) => state.people_by_key[person.key] || person);\n\nif (!state.employee_matches.length) {\n  return businessError('employee_not_found', 'Сотрудник с указанным ФИО не найден в активной кадровой выгрузке.');\n}\nif (state.employee_matches.length > 1) {\n  return businessError('employee_not_unique', 'По ФИО сотрудника найдено несколько активных сотрудников.');\n}\nif (!state.manager_matches.length) {\n  return businessError('manager_not_found', 'Заявленный руководитель с указанным ФИО не найден в активной кадровой выгрузке.');\n}\nif (state.manager_matches.length > 1) {\n  return businessError('manager_not_unique', 'По ФИО заявленного руководителя найдено несколько активных сотрудников.');\n}\n\nif (needs('administrative')) {\n  const status = statusOf(adminOrgResponse);\n  const body = bodyOf(adminOrgResponse);\n  if (status >= 400 || body?.success === false) {\n    return technicalError('hr_orgstructure_administrative_failed', 'HR API /Orgstructure.Administrative вернул ошибку.', { hr_status: status || null });\n  }\n}\nif (needs('managerial')) {\n  const status = statusOf(managerialOrgResponse);\n  const body = bodyOf(managerialOrgResponse);\n  if (status >= 400 || body?.success === false) {\n    return technicalError('hr_orgstructure_managerial_failed', 'HR API /Orgstructure.Managerial вернул ошибку.', { hr_status: status || null });\n  }\n}\n\nconst employee = state.employee_matches[0];\nconst claimedManager = state.manager_matches[0];\nconst peopleByKey = state.people_by_key || {};\nconst occupantsByPosition = state.occupants_by_position || {};\nconst checkedPairs = [];\nconst matchedEvidence = [];\n\nfunction samePerson(left, right) {\n  if (!left || !right) return false;\n  if (left.key && right.key && left.key === right.key) return true;\n  if (left.employee_gid && right.employee_gid && left.employee_gid === right.employee_gid) return true;\n  return false;\n}\n\nfunction occupants(positionGid, employeeToExclude) {\n  return (occupantsByPosition[positionGid] || [])\n    .map((key) => peopleByKey[key])\n    .filter(Boolean)\n    .filter((person) => !samePerson(person, employeeToExclude));\n}\n\nfunction addChecked(relationType, employeePosition, actualManagers, extra = {}) {\n  checkedPairs.push({\n    relation_type: relationType,\n    employee_position_gid: employeePosition.position_gid || null,\n    employee_position_name: employeePosition.position_name || null,\n    actual_managers: summarizePeople(actualManagers),\n    ...extra\n  });\n}\n\nfunction addMatch(relationType, employeePosition, managerPositionGid, extra = {}) {\n  matchedEvidence.push({\n    relation_type: relationType,\n    employee_key: employee.key,\n    manager_key: claimedManager.key,\n    employee_position_gid: employeePosition.position_gid || null,\n    employee_position_name: employeePosition.position_name || null,\n    manager_position_gid: managerPositionGid || null,\n    ...extra\n  });\n}\n\nfunction evaluateAdministrative() {\n  const adminUnits = {};\n  for (const block of rowsOf(adminOrgResponse)) {\n    const legalEntity = text(block.LegalEntity);\n    for (const unit of Array.isArray(block.OrgUnits) ? block.OrgUnits : []) {\n      const orgUnitGid = text(unit.OrgUnitGID);\n      if (!orgUnitGid) continue;\n      adminUnits[orgUnitGid] = {\n        org_unit_gid: orgUnitGid,\n        org_unit_name: text(unit.Name) || null,\n        legal_entity: legalEntity || null,\n        manager_position_gid: text(unit.ManagerPositionGID) || null\n      };\n    }\n  }\n  for (const position of employee.positions || []) {\n    const unit = adminUnits[position.org_unit_gid];\n    if (!unit || !unit.manager_position_gid) {\n      addChecked('administrative', position, [], { org_unit_gid: position.org_unit_gid || null, reason: unit ? 'manager_position_missing' : 'org_unit_not_found' });\n      continue;\n    }\n    const actualManagers = occupants(unit.manager_position_gid, employee);\n    addChecked('administrative', position, actualManagers, { org_unit_gid: unit.org_unit_gid, manager_position_gid: unit.manager_position_gid });\n    if (actualManagers.some((manager) => samePerson(manager, claimedManager))) {\n      addMatch('administrative', position, unit.manager_position_gid, { org_unit_gid: unit.org_unit_gid });\n    }\n  }\n}\n\nfunction evaluateManagerial() {\n  const orgParents = {};\n  const positionParents = {};\n  const positionIds = new Set();\n  const orgIds = new Set();\n  for (const block of rowsOf(managerialOrgResponse)) {\n    for (const unit of Array.isArray(block.OrgUnits) ? block.OrgUnits : []) {\n      const orgUnitGid = text(unit.OrgUnitGID);\n      if (!orgUnitGid) continue;\n      orgIds.add(orgUnitGid);\n      orgParents[orgUnitGid] = text(unit.ParentGID) || '';\n    }\n    for (const position of Array.isArray(block.Positions) ? block.Positions : []) {\n      const positionGid = text(position.PositionGID);\n      if (!positionGid) continue;\n      positionIds.add(positionGid);\n      positionParents[positionGid] = text(position.ParentGID) || '';\n    }\n  }\n\n  function nearestOccupiedParent(positionGid, employeeToExclude) {\n    let current = positionParents[positionGid] || '';\n    const visited = new Set([positionGid]);\n    for (let depth = 0; current && depth < 100; depth += 1) {\n      if (visited.has(current)) return { managers: [], manager_position_gid: null, reason: 'cycle_detected' };\n      visited.add(current);\n      if (positionIds.has(current) || occupantsByPosition[current]) {\n        const actualManagers = occupants(current, employeeToExclude);\n        if (actualManagers.length) return { managers: actualManagers, manager_position_gid: current, reason: null };\n        current = positionParents[current] || '';\n        continue;\n      }\n      if (orgIds.has(current)) {\n        current = orgParents[current] || '';\n        continue;\n      }\n      return { managers: [], manager_position_gid: null, reason: 'parent_not_found' };\n    }\n    return { managers: [], manager_position_gid: null, reason: current ? 'max_depth_exceeded' : 'manager_not_found' };\n  }\n\n  for (const position of employee.positions || []) {\n    const result = nearestOccupiedParent(position.position_gid, employee);\n    addChecked('managerial', position, result.managers, { manager_position_gid: result.manager_position_gid, reason: result.reason });\n    if (result.managers.some((manager) => samePerson(manager, claimedManager))) {\n      addMatch('managerial', position, result.manager_position_gid);\n    }\n  }\n}\n\nif (needs('administrative')) evaluateAdministrative();\nif (needs('managerial')) evaluateManagerial();\n\nif (!matchedEvidence.length) {\n  return businessError('confirmed_relation_not_found', 'Кадровая выгрузка не подтверждает заявленную пару сотрудник-руководитель.', {\n    checked_pairs: checkedPairs\n  });\n}\n\nconst pairKeys = new Set(matchedEvidence.map((item) => item.employee_key + '->' + item.manager_key));\nif (pairKeys.size !== 1) {\n  return businessError('multiple_confirmed_pairs', 'Найдено несколько подтвержденных пар сотрудник-руководитель.', {\n    checked_pairs: checkedPairs,\n    matched_pairs: matchedEvidence\n  });\n}\n\nconst relationTypes = Array.from(new Set(matchedEvidence.map((item) => item.relation_type))).sort();\nconst employeeSummary = summarizePerson(employee);\nconst managerSummary = summarizePerson(claimedManager);\nif (!employeeSummary.employee_id_found) {\n  return businessError('employee_id_not_found', 'Табельный номер сотрудника не найден в кадровой выгрузке.', {\n    matched_relation_types: relationTypes,\n    employee: employeeSummary,\n    manager: managerSummary,\n    matched_pairs: matchedEvidence,\n    checked_pairs: checkedPairs\n  });\n}\nif (!managerSummary.employee_id_found) {\n  return businessError('manager_id_not_found', 'Табельный номер руководителя не найден в кадровой выгрузке.', {\n    matched_relation_types: relationTypes,\n    employee: employeeSummary,\n    manager: managerSummary,\n    matched_pairs: matchedEvidence,\n    checked_pairs: checkedPairs\n  });\n}\nconst employeeIdText = 'ТН ' + employeeSummary.employee_id;\nconst managerIdText = 'ТН ' + managerSummary.employee_id;\n\nreturn [{\n  json: {\n    statusCode: 200,\n    response: {\n      status: 'OK',\n      message: 'Проверка OK: ' + employeeSummary.full_name + ' (' + employeeIdText + ') подчиняется ' + managerSummary.full_name + ' (' + managerIdText + ') по кадровой выгрузке.',\n      employee_id: employeeSummary.employee_id,\n      manager_id: managerSummary.employee_id,\n      relation_type_requested: state.relation_type,\n      matched_relation_types: relationTypes,\n      employee: employeeSummary,\n      manager: managerSummary,\n      matched_pairs: matchedEvidence,\n      checked_pairs: checkedPairs\n    }\n  }\n}];"
+      },
+      "id": "hr-verify-manager-evaluate",
+      "name": "Проверка пары руководитель-сотрудник",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1080,
-        300
+        2860,
+        200
       ]
     },
     {
       "parameters": {
         "respondWith": "json",
-        "responseCode": "={{ $json.statusCode }}",
-        "responseBody": "={{ JSON.stringify($json) }}",
-        "options": {}
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}"
+        }
       },
-      "id": "hr-respond-result",
+      "id": "hr-verify-manager-response",
       "name": "Нормализованный ответ",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
-        1340,
+        3120,
         300
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Webhook проверки руководителя\n\nДелает: Принимает POST /webhook/hr/verify-manager с ФИО сотрудника, ФИО заявленного руководителя и optional relation_type.\n\nОпирается на: Production webhook registration и caller, который передает JSON body.\n\nОшибки/ветки: До import/activation endpoint вернет 404; malformed body валидирует следующий Code node.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "hr-verify-manager-webhook-note",
+      "name": "Note: Webhook проверки руководителя",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        470
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Подготовка запроса HR\n\nДелает: Валидирует X-ServiceDesk-Token, ФИО, relation_type, legal_entities и HR_API_BASE_URL.\n\nОпирается на: N8N_WEBHOOK_TOKEN, HR_API_BASE_URL и request body caller-а.\n\nОшибки/ветки: Возвращает 400 для validation errors, 401 для token errors и 500 для отсутствующего HR_API_BASE_URL.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "hr-verify-manager-prepare-note",
+      "name": "Note: Подготовка запроса HR",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        520,
+        470
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Запрос валиден?\n\nДелает: Маршрутизирует валидный запрос к HR API, а validation/auth/config error сразу в response.\n\nОпирается на: Boolean valid из узла подготовки запроса.\n\nОшибки/ветки: False branch завершает HTTP request structured error без вызова HR API.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "hr-verify-manager-valid-note",
+      "name": "Note: Запрос валиден?",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        780,
+        470
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Загрузка активных назначений\n\nДелает: Запрашивает /Positions.Hired для построения active employee/person/position snapshot.\n\nОпирается на: HR API Header Auth credential, HR_API_BASE_URL и request body legalEntities/onlyFullDefined/withDuplicateEmployees.\n\nОшибки/ветки: HTTP/network/API failure сохраняется как fullResponse и превращается в 502 в следующем Code node.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "hr-verify-manager-positions-hired-note",
+      "name": "Note: Загрузка активных назначений",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1040,
+        370
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Подготовка набора кандидатов\n\nДелает: Нормализует active HR snapshot, группирует людей по EmployeeGID/PersonGID, ищет всех тезок сотрудника и заявленного руководителя.\n\nОпирается на: Ответ /Positions.Hired и правила HR export: PersonInfo optional, EmployeeID может отсутствовать.\n\nОшибки/ветки: Возвращает 502, если /Positions.Hired недоступен; иначе передает найденных кандидатов и список manager EmployeeGID дальше.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "hr-verify-manager-build-state-note",
+      "name": "Note: Подготовка набора кандидатов",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1300,
+        370
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Ответ уже готов?\n\nДелает: Завершает workflow, если ошибка /Positions.Hired уже сформировала response.\n\nОпирается на: Boolean done из узла подготовки кандидатов.\n\nОшибки/ветки: False branch продолжает загрузку оргструктур и subordinate endpoints.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "hr-verify-manager-state-done-note",
+      "name": "Note: Ответ уже готов?",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1560,
+        370
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Загрузка административной оргструктуры\n\nДелает: Запрашивает /Orgstructure.Administrative для проверки administrative relation через ManagerPositionGID.\n\nОпирается на: HR API Header Auth credential и HR_API_BASE_URL.\n\nОшибки/ветки: Для relation_type administrative или both HTTP/API failure превращается в 502 в финальной проверке.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "hr-verify-manager-org-admin-note",
+      "name": "Note: Загрузка административной оргструктуры",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1820,
+        210
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Загрузка управленческой оргструктуры\n\nДелает: Запрашивает /Orgstructure.Managerial для проверки managerial relation по ближайшей занятой parent-position.\n\nОпирается на: HR API Header Auth credential и HR_API_BASE_URL.\n\nОшибки/ветки: Для relation_type managerial или both HTTP/API failure превращается в 502 в финальной проверке.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "hr-verify-manager-org-managerial-note",
+      "name": "Note: Загрузка управленческой оргструктуры",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2080,
+        210
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Загрузка административных подчиненных\n\nДелает: Запрашивает /Employee.Subordinates.Administrative для best-effort обогащения табельных номеров.\n\nОпирается на: Manager EmployeeGIDs из набора кандидатов и HR API Header Auth credential.\n\nОшибки/ветки: Failure не прерывает workflow как technical error; если после обогащения не найден ТН сотрудника или руководителя, финальная проверка вернет business ERROR.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "hr-verify-manager-sub-admin-note",
+      "name": "Note: Загрузка административных подчиненных",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2340,
+        210
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Загрузка управленческих подчиненных\n\nДелает: Запрашивает /Employee.Subordinates.Managerial для best-effort обогащения табельных номеров.\n\nОпирается на: Manager EmployeeGIDs из набора кандидатов и HR API Header Auth credential.\n\nОшибки/ветки: Failure не прерывает workflow как technical error; если после обогащения не найден ТН сотрудника или руководителя, финальная проверка вернет business ERROR.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "hr-verify-manager-sub-managerial-note",
+      "name": "Note: Загрузка управленческих подчиненных",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2600,
+        210
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Проверка пары руководитель-сотрудник\n\nДелает: Проверяет unique employee/manager candidates, administrative/managerial relation evidence и наличие employee_id/manager_id для OK.\n\nОпирается на: Active assignments, HR org structures, subordinate enrichment и relation_type administrative/managerial/both.\n\nОшибки/ветки: Возвращает business ERROR при not found/duplicates/no confirmed relation/employee_id_not_found/manager_id_not_found; возвращает 502 при required HR org endpoint failure.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "hr-verify-manager-evaluate-note",
+      "name": "Note: Проверка пары руководитель-сотрудник",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2860,
+        370
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Нормализованный ответ\n\nДелает: Возвращает caller-у JSON response с OK/ERROR или structured technical error.\n\nОпирается на: statusCode/response из validation или финального Code node.\n\nОшибки/ветки: Неверная response shape ломает OpenAPI contract verifyEmployeeManager.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "hr-verify-manager-response-note",
+      "name": "Note: Нормализованный ответ",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3120,
+        470
       ]
     }
   ],
   "connections": {
-    "Webhook запроса": {
+    "Webhook проверки руководителя": {
       "main": [
         [
           {
-            "node": "Валидация входных данных",
+            "node": "Подготовка запроса HR",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Валидация входных данных": {
+    "Подготовка запроса HR": {
       "main": [
         [
           {
-            "node": "Загрузка сотрудников",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Загрузка оргструктуры",
+            "node": "Запрос валиден?",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Загрузка сотрудников": {
+    "Запрос валиден?": {
       "main": [
         [
           {
-            "node": "Поиск руководителя",
+            "node": "Загрузка активных назначений",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Нормализованный ответ",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Загрузка оргструктуры": {
+    "Загрузка активных назначений": {
       "main": [
         [
           {
-            "node": "Поиск руководителя",
+            "node": "Подготовка набора кандидатов",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Поиск руководителя": {
+    "Подготовка набора кандидатов": {
+      "main": [
+        [
+          {
+            "node": "Ответ уже готов?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ответ уже готов?": {
+      "main": [
+        [
+          {
+            "node": "Нормализованный ответ",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Загрузка административной оргструктуры",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Загрузка административной оргструктуры": {
+      "main": [
+        [
+          {
+            "node": "Загрузка управленческой оргструктуры",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Загрузка управленческой оргструктуры": {
+      "main": [
+        [
+          {
+            "node": "Загрузка административных подчиненных",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Загрузка административных подчиненных": {
+      "main": [
+        [
+          {
+            "node": "Загрузка управленческих подчиненных",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Загрузка управленческих подчиненных": {
+      "main": [
+        [
+          {
+            "node": "Проверка пары руководитель-сотрудник",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Проверка пары руководитель-сотрудник": {
       "main": [
         [
           {
@@ -170,6 +614,10 @@
   },
   "active": false,
   "settings": {
-    "executionOrder": "v1"
-  }
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false
+  },
+  "description": "Логика работы: проверяет, подтверждает ли кадровая выгрузка заявленную пару сотрудник-руководитель по ФИО.\n\nWorkflow валидирует token и входные ФИО, загружает активные назначения, административную и управленческую структуры HR, находит всех тезок и возвращает OK только для единственной подтвержденной пары с найденными табельными номерами сотрудника и руководителя.\n\nОтладка: включить N8N_WORKFLOW_DEBUG=Basic, проверить HR_API_BASE_URL, credential HR API Header Auth, затем выполнить auth-negative, not-found, duplicate-name и happy-path smoke."
 }

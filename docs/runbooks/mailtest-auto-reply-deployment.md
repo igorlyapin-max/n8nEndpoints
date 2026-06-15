@@ -49,8 +49,8 @@ SMTP:
 ## Import And Activation
 
 1. Import `workflows/mailtest-auto-reply.json`.
-2. Bind the IMAP credential on node `Получение письма`.
-3. Bind the SMTP credential on node `Отправка автоответа`.
+2. Check or bind the IMAP credential on node `Получение письма`.
+3. Check or bind the SMTP credential on node `Отправка автоответа`.
 4. Activate the workflow.
 5. Send a test message and confirm an auto reply is generated.
 

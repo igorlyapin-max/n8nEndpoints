@@ -1,0 +1,606 @@
+{
+  "id": "getCmdbuildProviderEmailContext",
+  "name": "CMDBuild: параметры письма провайдеру",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cmdbuild/provider-email-context",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "cmdbuild-provider-context-webhook",
+      "name": "Webhook контекста провайдера",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "5d3c4ad5-8f7a-41b9-a2d1-1bc7a8f4426a",
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json || {};\nconst headers = input.headers || {};\nconst body = input.body || {};\nconst expectedToken = (typeof $env !== 'undefined' && $env.N8N_WEBHOOK_TOKEN) || (typeof process !== 'undefined' && process.env.N8N_WEBHOOK_TOKEN) || '';\nconst actualToken = headers['x-servicedesk-token'] || headers['X-ServiceDesk-Token'] || headers['X-Servicedesk-Token'] || '';\nconst debugLevel = String((typeof $env !== 'undefined' && $env.N8N_WORKFLOW_DEBUG) || (typeof process !== 'undefined' && process.env.N8N_WORKFLOW_DEBUG) || 'off');\n\nconst diagnostic = (level, event, fields = {}) => {\n  const order = { off: 0, Basic: 1, Verbose: 2 };\n  if ((order[debugLevel] || 0) < (order[level] || 0)) return;\n  const safe = {};\n  for (const [key, value] of Object.entries(fields)) {\n    if (/token|password|secret|body|email/i.test(key)) continue;\n    safe[key] = value;\n  }\n  console.log(JSON.stringify({ ts: new Date().toISOString(), level, event, ...safe }));\n};\n\nconst response = (statusCode, code, message, details = {}) => {\n  diagnostic('Basic', 'cmdbuild_provider_context_rejected', { statusCode, code });\n  return [{ json: { valid: false, statusCode, response: { error: { code, message, ...details } } } }];\n};\n\nif (!expectedToken || actualToken !== expectedToken) {\n  return response(401, 'unauthorized', 'Токен webhook отсутствует или некорректен.');\n}\n\nconst hostname = String(body.hostname || body.hostName || '').trim();\nif (!hostname) return response(400, 'missing_hostname', 'Поле hostname обязательно.');\nif (hostname.length > 500) return response(400, 'hostname_too_long', 'Поле hostname слишком длинное.');\nif (/[\\u0000-\\u001f\\u007f]/.test(hostname)) {\n  return response(400, 'invalid_hostname', 'Поле hostname не должно содержать управляющие символы.');\n}\n\nconst rawBaseUrl = String((typeof $env !== 'undefined' && $env.CMDBUILD_BASE_URL) || (typeof process !== 'undefined' && process.env.CMDBUILD_BASE_URL) || 'http://172.18.0.4:8080/cmdbuild').trim();\nif (!/^https?:\\/\\/[^/?#]+(?:\\/[^?#]*)?$/i.test(rawBaseUrl)) {\n  return response(500, 'invalid_cmdbuild_base_url', 'CMDBUILD_BASE_URL должен быть http/https URL без query/fragment.');\n}\nconst cmdbuildBaseUrl = rawBaseUrl.replace(/\\/+$/, '');\nconst filter = {\n  attribute: {\n    simple: {\n      attribute: 'Description',\n      operator: 'equal',\n      value: [hostname]\n    }\n  }\n};\nconst routerSearchUrl = cmdbuildBaseUrl + '/services/rest/v3/classes/routerG/cards?limit=2&filter=' + encodeURIComponent(JSON.stringify(filter));\n\ndiagnostic('Basic', 'cmdbuild_provider_context_accepted', { hostname });\n\nreturn [{\n  json: {\n    valid: true,\n    statusCode: 200,\n    hostname,\n    cmdbuild_base_url: cmdbuildBaseUrl,\n    router_search_url: routerSearchUrl\n  }\n}];"
+      },
+      "id": "cmdbuild-provider-context-prepare",
+      "name": "Подготовка запроса CMDBuild",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.valid }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "cmdbuild-provider-context-valid",
+      "name": "Запрос валиден?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        780,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.router_search_url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "cmdbuild-provider-context-search-router",
+      "name": "Поиск routerG",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1040,
+        200
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "localCmdbuildAdminTest",
+          "name": "Local CMDBuild Admin Test"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const searchResponse = $input.first().json || {};\nconst requestState = $('Подготовка запроса CMDBuild').first().json || {};\n\nconst response = (statusCode, code, message, details = {}) => [{\n  json: {\n    done: true,\n    statusCode,\n    response: {\n      error: {\n        code,\n        message,\n        ...details\n      }\n    }\n  }\n}];\n\nconst body = searchResponse.body && typeof searchResponse.body === 'object' ? searchResponse.body : searchResponse;\nconst httpStatus = Number(searchResponse.statusCode || 200);\nif (httpStatus === 401 || httpStatus === 403) {\n  return response(502, 'cmdbuild_auth_failed', 'CMDBuild authentication failed.');\n}\nif (httpStatus >= 400 || body.success === false) {\n  return response(502, 'cmdbuild_lookup_failed', 'CMDBuild routerG lookup failed.', { cmdbuild_status: httpStatus || null });\n}\n\nconst rows = Array.isArray(body.data) ? body.data : [];\nconst total = Number(body.meta?.total ?? rows.length);\nif (total === 0 || rows.length === 0) {\n  return response(404, 'router_not_found', 'routerG не найден по Description.', { hostname: requestState.hostname });\n}\nif (total > 1 || rows.length > 1) {\n  return response(409, 'router_not_unique', 'По hostname найдено несколько routerG объектов.', { hostname: requestState.hostname, match_count: total || rows.length });\n}\n\nconst router = rows[0] || {};\nconst text = (value) => value === undefined || value === null ? '' : String(value).trim();\nconst missing = [];\nconst providerEmail = text(router.email);\nconst contract = text(router.contract);\nconst ipaddressId = text(router.ipaddress);\nconst roomId = text(router.Location);\nif (!providerEmail) missing.push('email');\nif (!contract) missing.push('contract');\nif (!ipaddressId) missing.push('ipaddress');\nif (!roomId) missing.push('Location');\nif (missing.length) {\n  return response(422, 'missing_cmdbuild_field', 'В routerG не заполнены обязательные атрибуты.', {\n    hostname: requestState.hostname,\n    router_id: router._id || null,\n    missing_fields: missing\n  });\n}\n\nreturn [{\n  json: {\n    done: false,\n    hostname: requestState.hostname,\n    cmdbuild_base_url: requestState.cmdbuild_base_url,\n    router_id: router._id,\n    router_code: text(router.Code),\n    provider_email: providerEmail,\n    contract,\n    ipaddress_id: ipaddressId,\n    room_id: roomId,\n    ip_url: requestState.cmdbuild_base_url + '/services/rest/v3/classes/IpAddress/cards/' + encodeURIComponent(ipaddressId),\n    room_url: requestState.cmdbuild_base_url + '/services/rest/v3/classes/Room/cards/' + encodeURIComponent(roomId)\n  }\n}];"
+      },
+      "id": "cmdbuild-provider-context-parse-router",
+      "name": "Разбор routerG",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.done }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "cmdbuild-provider-context-done",
+      "name": "Ответ уже готов?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1560,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.ip_url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "cmdbuild-provider-context-get-ip",
+      "name": "Чтение IpAddress",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1820,
+        120
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "localCmdbuildAdminTest",
+          "name": "Local CMDBuild Admin Test"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Разбор routerG').first().json.room_url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "cmdbuild-provider-context-get-room",
+      "name": "Чтение Room",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2080,
+        120
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "localCmdbuildAdminTest",
+          "name": "Local CMDBuild Admin Test"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Разбор routerG').first().json.cmdbuild_base_url + '/services/rest/v3/classes/Floor/cards/' + (((($('Чтение Room').first().json.body || {}).data || {}).Floor) || '0') }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "cmdbuild-provider-context-get-floor",
+      "name": "Чтение Floor",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2340,
+        120
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "localCmdbuildAdminTest",
+          "name": "Local CMDBuild Admin Test"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Разбор routerG').first().json.cmdbuild_base_url + '/services/rest/v3/classes/Building/cards/' + (((($('Чтение Floor').first().json.body || {}).data || {}).Building) || '0') }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "cmdbuild-provider-context-get-building",
+      "name": "Чтение Building",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2600,
+        120
+      ],
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "localCmdbuildAdminTest",
+          "name": "Local CMDBuild Admin Test"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const routerState = $('Разбор routerG').first().json || {};\nconst ipResponse = $('Чтение IpAddress').first().json || {};\nconst roomResponse = $('Чтение Room').first().json || {};\nconst floorResponse = $('Чтение Floor').first().json || {};\nconst buildingResponse = $('Чтение Building').first().json || {};\n\nconst response = (statusCode, code, message, details = {}) => [{\n  json: {\n    statusCode,\n    response: {\n      error: {\n        code,\n        message,\n        ...details\n      }\n    }\n  }\n}];\n\nconst bodyOf = (value) => value.body && typeof value.body === 'object' ? value.body : value;\nconst statusOf = (value) => Number(value.statusCode || 200);\nconst dataOf = (value) => {\n  const body = bodyOf(value);\n  return body && typeof body === 'object' ? body.data : null;\n};\nconst text = (value) => value === undefined || value === null ? '' : String(value).trim();\n\nconst checkedResponses = [\n  ['IpAddress', ipResponse],\n  ['Room', roomResponse],\n  ['Floor', floorResponse],\n  ['Building', buildingResponse]\n];\nfor (const [className, httpResponse] of checkedResponses) {\n  const httpStatus = statusOf(httpResponse);\n  const body = bodyOf(httpResponse);\n  if (httpStatus === 401 || httpStatus === 403) {\n    return response(502, 'cmdbuild_auth_failed', 'CMDBuild authentication failed.', { class_name: className });\n  }\n  if (httpStatus >= 400 || body.success === false) {\n    return response(502, 'cmdbuild_lookup_failed', 'CMDBuild reference lookup failed.', { class_name: className, cmdbuild_status: httpStatus || null });\n  }\n}\n\nconst ip = dataOf(ipResponse) || {};\nconst room = dataOf(roomResponse) || {};\nconst floor = dataOf(floorResponse) || {};\nconst building = dataOf(buildingResponse) || {};\n\nconst missing = [];\nconst ipAddress = text(ip.Description);\nconst location = text(room.Description);\nconst floorId = text(room.Floor);\nconst buildingId = text(floor.Building);\nconst city = text(building.City);\nif (!ipAddress) missing.push('IpAddress.Description');\nif (!location) missing.push('Room.Description');\nif (!floorId) missing.push('Room.Floor');\nif (!buildingId) missing.push('Floor.Building');\nif (!city) missing.push('Building.City');\nif (missing.length) {\n  return response(422, 'missing_cmdbuild_field', 'В CMDBuild reference chain не заполнены обязательные атрибуты.', {\n    hostname: routerState.hostname,\n    router_id: routerState.router_id || null,\n    missing_fields: missing\n  });\n}\n\nreturn [{\n  json: {\n    statusCode: 200,\n    response: {\n      status: 'OK',\n      hostname: routerState.hostname,\n      router_id: routerState.router_id,\n      city,\n      location,\n      ip_address: ipAddress,\n      contract: routerState.contract,\n      provider_email: routerState.provider_email\n    }\n  }\n}];"
+      },
+      "id": "cmdbuild-provider-context-normalize",
+      "name": "Нормализация ответа",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}"
+        }
+      },
+      "id": "cmdbuild-provider-context-response",
+      "name": "Нормализованный ответ",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        3120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Webhook контекста провайдера\n\nДелает: Принимает POST /webhook/cmdbuild/provider-email-context с hostname.\n\nОпирается на: Header X-ServiceDesk-Token и production webhook registration.\n\nОшибки/ветки: До activation endpoint вернет 404; без token следующий Code node возвращает 401.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "cmdbuild-provider-context-webhook-note",
+      "name": "Note: Webhook контекста провайдера",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        470
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Подготовка запроса CMDBuild\n\nДелает: Валидирует token/hostname, вычисляет CMDBuild base URL и строит search URL для routerG.\n\nОпирается на: N8N_WEBHOOK_TOKEN, optional CMDBUILD_BASE_URL и request body.\n\nОшибки/ветки: Возвращает 400/401/500 для missing или invalid input/base URL до обращения к CMDBuild.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "cmdbuild-provider-context-prepare-note",
+      "name": "Note: Подготовка запроса CMDBuild",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        520,
+        470
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Запрос валиден?\n\nДелает: Маршрутизирует валидный запрос в CMDBuild lookup или сразу возвращает validation/auth error.\n\nОпирается на: Boolean valid из узла подготовки запроса.\n\nОшибки/ветки: False branch завершает workflow structured error response без CMDBuild REST calls.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "cmdbuild-provider-context-valid-note",
+      "name": "Note: Запрос валиден?",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        780,
+        470
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Поиск routerG\n\nДелает: Ищет routerG cards по exact Description через CMDBuild REST.\n\nОпирается на: HTTP Basic credential Local CMDBuild Admin Test и router_search_url.\n\nОшибки/ветки: HTTP status не роняет workflow; следующий Code node нормализует auth/lookup/not found/not unique.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "cmdbuild-provider-context-search-router-note",
+      "name": "Note: Поиск routerG",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1040,
+        370
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Разбор routerG\n\nДелает: Проверяет результат поиска, обязательные routerG поля и строит reference URLs для IpAddress и Room.\n\nОпирается на: CMDBuild response, hostname и CMDBuild base URL из узла подготовки.\n\nОшибки/ветки: Возвращает 404 router_not_found, 409 router_not_unique или 422 missing_cmdbuild_field.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "cmdbuild-provider-context-parse-router-note",
+      "name": "Note: Разбор routerG",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1300,
+        370
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Ответ уже готов?\n\nДелает: Разделяет terminal error response и дальнейшее чтение reference chain.\n\nОпирается на: Boolean done из узла разбора routerG.\n\nОшибки/ветки: False branch требует валидные ip_url и room_url.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "cmdbuild-provider-context-done-note",
+      "name": "Note: Ответ уже готов?",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1560,
+        370
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Чтение IpAddress\n\nДелает: Читает referenced IpAddress card для получения Description как ip_address.\n\nОпирается на: ip_url и HTTP Basic credential Local CMDBuild Admin Test.\n\nОшибки/ветки: HTTP/auth/schema ошибки нормализуются финальным Code node.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "cmdbuild-provider-context-get-ip-note",
+      "name": "Note: Чтение IpAddress",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1820,
+        290
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Чтение Room\n\nДелает: Читает referenced Room card для location и Floor reference.\n\nОпирается на: room_url и HTTP Basic credential Local CMDBuild Admin Test.\n\nОшибки/ветки: HTTP/auth/schema ошибки нормализуются финальным Code node.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "cmdbuild-provider-context-get-room-note",
+      "name": "Note: Чтение Room",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2080,
+        290
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Чтение Floor\n\nДелает: Читает referenced Floor card для Building reference.\n\nОпирается на: Room.Floor из ответа CMDBuild и HTTP Basic credential.\n\nОшибки/ветки: Отсутствующий Room.Floor приводит к missing_cmdbuild_field в финальном ответе.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "cmdbuild-provider-context-get-floor-note",
+      "name": "Note: Чтение Floor",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2340,
+        290
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Чтение Building\n\nДелает: Читает referenced Building card для поля City.\n\nОпирается на: Floor.Building из ответа CMDBuild и HTTP Basic credential.\n\nОшибки/ветки: Отсутствующий Building.City приводит к missing_cmdbuild_field.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "cmdbuild-provider-context-get-building-note",
+      "name": "Note: Чтение Building",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2600,
+        290
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Нормализация ответа\n\nДелает: Собирает итоговый OK response или structured error по reference chain.\n\nОпирается на: Результаты чтения IpAddress, Room, Floor, Building и state из routerG.\n\nОшибки/ветки: Возвращает 502 для CMDBuild REST failures и 422 для пустых обязательных reference атрибутов.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "cmdbuild-provider-context-normalize-note",
+      "name": "Note: Нормализация ответа",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2860,
+        290
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Нормализованный ответ\n\nДелает: Возвращает JSON response caller-у.\n\nОпирается на: statusCode/response из validation, router parse или final normalization.\n\nОшибки/ветки: Неверная response shape нарушит OpenAPI contract getProviderEmailContext.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "cmdbuild-provider-context-response-note",
+      "name": "Note: Нормализованный ответ",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        3120,
+        470
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook контекста провайдера": {
+      "main": [
+        [
+          {
+            "node": "Подготовка запроса CMDBuild",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Подготовка запроса CMDBuild": {
+      "main": [
+        [
+          {
+            "node": "Запрос валиден?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Запрос валиден?": {
+      "main": [
+        [
+          {
+            "node": "Поиск routerG",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Нормализованный ответ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Поиск routerG": {
+      "main": [
+        [
+          {
+            "node": "Разбор routerG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Разбор routerG": {
+      "main": [
+        [
+          {
+            "node": "Ответ уже готов?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ответ уже готов?": {
+      "main": [
+        [
+          {
+            "node": "Нормализованный ответ",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Чтение IpAddress",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Чтение IpAddress": {
+      "main": [
+        [
+          {
+            "node": "Чтение Room",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Чтение Room": {
+      "main": [
+        [
+          {
+            "node": "Чтение Floor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Чтение Floor": {
+      "main": [
+        [
+          {
+            "node": "Чтение Building",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Чтение Building": {
+      "main": [
+        [
+          {
+            "node": "Нормализация ответа",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Нормализация ответа": {
+      "main": [
+        [
+          {
+            "node": "Нормализованный ответ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false
+  },
+  "description": "Логика работы: read-only получает из CMDBuild параметры для письма провайдеру по hostname routerG.\n\nWorkflow валидирует token/hostname, ищет активный routerG по точному Description, читает IpAddress, Room, Floor и Building через CMDBuild REST и возвращает city/location/ip_address/contract/provider_email.\n\nОтладка: проверить N8N_WEBHOOK_TOKEN, CMDBUILD_BASE_URL, credential Local CMDBuild Admin Test, затем выполнить auth-negative, missing-hostname, missing-field и happy-path smoke."
+}

@@ -65,10 +65,31 @@ Workflow `Contracts: Email template catalog` отдает машинночита
         "service_request"
       ],
       "optional_params": []
+    },
+    {
+      "template_id": "ad_password_reset_notification",
+      "display_name": "Уведомление о смене пароля AD",
+      "subject_template": "Смена пароля по заявке № {{service_request}}",
+      "required_params": [
+        "service_request",
+        "employee_full_name",
+        "password"
+      ],
+      "optional_params": [],
+      "params": [
+        {
+          "name": "password",
+          "type": "string",
+          "required": true,
+          "sensitive": true
+        }
+      ]
     }
   ]
 }
 ```
+
+Если параметр в catalog помечен `sensitive: true`, caller и UI должны считать его секретом: не писать значение в логи, comments, screenshots, callback payloads, Kafka events или долговременное хранилище.
 
 ## Repository Mode
 

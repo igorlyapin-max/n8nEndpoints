@@ -2,6 +2,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import process from 'node:process';
+import { documentedWorkflow } from './workflow-inline-documentation.mjs';
 
 const CATALOG_PATH = 'contracts/email-template-catalog.json';
 const CATALOG_WORKFLOW_PATH = 'workflows/email-template-catalog-webhook.json';
@@ -164,7 +165,7 @@ function buildSendCode(catalog) {
 }
 
 function catalogWorkflow(catalog) {
-  return {
+  return documentedWorkflow({
     id: 'emailTemplateCatalog',
     name: 'Contracts: Email template catalog',
     nodes: [
@@ -234,12 +235,15 @@ function catalogWorkflow(catalog) {
     active: false,
     settings: {
       executionOrder: 'v1',
+      saveDataErrorExecution: 'none',
+      saveDataSuccessExecution: 'none',
+      saveManualExecutions: false,
     },
-  };
+  });
 }
 
 function sendWorkflow(catalog) {
-  return {
+  return documentedWorkflow({
     id: 'sendTemplatedEmail',
     name: 'Email: отправка письма по шаблону',
     nodes: [
@@ -307,6 +311,12 @@ function sendWorkflow(catalog) {
         type: 'n8n-nodes-base.emailSend',
         typeVersion: 2.1,
         position: [1080, 200],
+        credentials: {
+          smtp: {
+            id: 'Fh3kVhbHL6XxDh1c',
+            name: 'GreenMail SMTP (local test)',
+          },
+        },
         continueOnFail: true,
       },
       {
@@ -415,8 +425,11 @@ function sendWorkflow(catalog) {
     active: false,
     settings: {
       executionOrder: 'v1',
+      saveDataErrorExecution: 'none',
+      saveDataSuccessExecution: 'none',
+      saveManualExecutions: false,
     },
-  };
+  });
 }
 
 function expectedFiles(catalog) {

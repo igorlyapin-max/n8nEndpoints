@@ -1,0 +1,133 @@
+{
+  "id": "verifyApplicantParticipant",
+  "name": "HR: проверка заявителя среди участников",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "hr/verify-applicant-participant",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "hr-applicant-participant-webhook",
+      "name": "Webhook проверки заявителя",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "e29b9c4f-4189-4e3d-9238-4fa7d9e4d605",
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json || {};\nconst headers = input.headers || {};\nconst body = input.body && typeof input.body === 'object' ? input.body : {};\nconst env = typeof $env !== 'undefined' ? $env : {};\nconst envValue = (name) => env[name] || (typeof process !== 'undefined' ? process.env[name] : '') || '';\nconst expectedToken = envValue('N8N_WEBHOOK_TOKEN');\nconst actualToken = headers['x-servicedesk-token'] || headers['X-ServiceDesk-Token'] || headers['X-Servicedesk-Token'] || '';\nconst debugLevel = String(envValue('N8N_WORKFLOW_DEBUG') || 'off');\n\nfunction diagnostic(level, event, fields = {}) {\n  const order = { off: 0, Basic: 1, Verbose: 2 };\n  if ((order[debugLevel] || 0) < (order[level] || 0)) return;\n  const safe = {};\n  for (const [key, value] of Object.entries(fields)) {\n    if (/token|password|secret|authorization|full_name|name|person|employee|manager|applicant/i.test(key)) continue;\n    safe[key] = value;\n  }\n  console.log(JSON.stringify({ ts: new Date().toISOString(), level, event, ...safe }));\n}\n\nfunction response(statusCode, payload) {\n  return [{ json: { statusCode, response: payload } }];\n}\n\nfunction error(statusCode, code, message, details = {}) {\n  diagnostic('Basic', 'hr_applicant_participant_rejected', { statusCode, code });\n  return response(statusCode, { error: { code, message, ...details } });\n}\n\nfunction businessError(code, message, details = {}) {\n  diagnostic('Basic', 'hr_applicant_participant_business_error', { code });\n  return response(200, { status: 'ERROR', error_code: code, message, ...details });\n}\n\nfunction stringValue(...values) {\n  for (const value of values) {\n    if (value !== undefined && value !== null && String(value).trim()) return String(value).trim();\n  }\n  return '';\n}\n\nfunction normalizeName(value) {\n  return String(value || '').replace(/\\s+/g, ' ').trim();\n}\n\nfunction nameKey(value) {\n  return normalizeName(value).toLocaleLowerCase('ru-RU');\n}\n\nfunction hasControlChars(value) {\n  return /[\\u0000-\\u001f\\u007f]/.test(value);\n}\n\nif (!expectedToken || actualToken !== expectedToken) {\n  return error(401, 'unauthorized', 'Токен webhook отсутствует или некорректен.');\n}\n\nconst applicantFullName = normalizeName(stringValue(body.applicant_full_name, body.applicantFullName));\nconst employeeFullName = normalizeName(stringValue(body.employee_full_name, body.employeeFullName));\nconst managerFullName = normalizeName(stringValue(body.manager_full_name, body.managerFullName));\n\nif (!applicantFullName) return error(400, 'missing_applicant_full_name', 'Поле applicant_full_name обязательно.');\nif (!employeeFullName) return error(400, 'missing_employee_full_name', 'Поле employee_full_name обязательно.');\nif (!managerFullName) return error(400, 'missing_manager_full_name', 'Поле manager_full_name обязательно.');\n\nconst values = [applicantFullName, employeeFullName, managerFullName];\nif (values.some((value) => value.length > 300)) {\n  return error(400, 'full_name_too_long', 'ФИО не должно превышать 300 символов.');\n}\nif (values.some(hasControlChars)) {\n  return error(400, 'invalid_full_name', 'ФИО не должно содержать управляющие символы.');\n}\n\nconst applicantKey = nameKey(applicantFullName);\nconst employeeKey = nameKey(employeeFullName);\nconst managerKey = nameKey(managerFullName);\nconst matchesEmployee = applicantKey === employeeKey;\nconst matchesManager = applicantKey === managerKey;\n\nconst common = {\n  applicant_full_name: applicantFullName,\n  employee_full_name: employeeFullName,\n  manager_full_name: managerFullName\n};\n\nif (!matchesEmployee && !matchesManager) {\n  return businessError('applicant_not_participant', 'Заявитель не совпадает ни с сотрудником, ни с руководителем.', common);\n}\n\nconst matchedRole = matchesEmployee && matchesManager ? 'both' : matchesEmployee ? 'employee' : 'manager';\ndiagnostic('Basic', 'hr_applicant_participant_ok', { matched_role: matchedRole });\n\nreturn response(200, {\n  status: 'OK',\n  matched_role: matchedRole,\n  ...common\n});"
+      },
+      "id": "hr-applicant-participant-verify",
+      "name": "Проверка заявителя",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}"
+        }
+      },
+      "id": "hr-applicant-participant-response",
+      "name": "Нормализованный ответ",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        780,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Webhook проверки заявителя\n\nДелает: Принимает POST /webhook/hr/verify-applicant-participant с applicant_full_name, employee_full_name и manager_full_name.\n\nОпирается на: Production webhook registration и caller, который передает X-ServiceDesk-Token.\n\nОшибки/ветки: До import/activation endpoint вернет 404; malformed body валидирует следующий Code node.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "hr-applicant-participant-webhook-note",
+      "name": "Note: Webhook проверки заявителя",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        470
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Проверка заявителя\n\nДелает: Валидирует token и ФИО, нормализует значения, сравнивает заявителя с сотрудником и руководителем.\n\nОпирается на: N8N_WEBHOOK_TOKEN, request body и выбранное правило нормализации ФИО без HR/AD lookup.\n\nОшибки/ветки: Возвращает 400/401 для validation/auth errors и HTTP 200 status ERROR applicant_not_participant для бизнес-несовпадения.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "hr-applicant-participant-verify-note",
+      "name": "Note: Проверка заявителя",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        520,
+        470
+      ]
+    },
+    {
+      "parameters": {
+        "content": "### Нормализованный ответ\n\nДелает: Возвращает caller-у JSON response с OK/matched_role, business ERROR или structured validation/auth error.\n\nОпирается на: statusCode/response из Code node проверки заявителя.\n\nОшибки/ветки: Неверная response shape ломает OpenAPI contract verifyApplicantParticipant.",
+        "height": 180,
+        "width": 360,
+        "color": 7
+      },
+      "id": "hr-applicant-participant-response-note",
+      "name": "Note: Нормализованный ответ",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        780,
+        470
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook проверки заявителя": {
+      "main": [
+        [
+          {
+            "node": "Проверка заявителя",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Проверка заявителя": {
+      "main": [
+        [
+          {
+            "node": "Нормализованный ответ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": false
+  },
+  "description": "Логика работы: read-only проверяет, что ФИО заявителя совпадает с ФИО сотрудника или ФИО руководителя из входных параметров.\n\nWorkflow валидирует token и три ФИО, нормализует пробелы и регистр через ru-RU locale, затем возвращает OK с matched_role employee, manager или both либо business ERROR.\n\nОтладка: включить N8N_WORKFLOW_DEBUG=Basic, выполнить auth-negative, missing-field, applicant=employee, applicant=manager, applicant=both и applicant_not_participant smoke."
+}

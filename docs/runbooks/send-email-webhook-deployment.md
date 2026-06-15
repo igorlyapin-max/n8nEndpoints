@@ -14,7 +14,7 @@
 1. Откройте n8n UI: `http://127.0.0.1:5678`.
 2. Импортируйте `workflows/send-email-webhook.json`.
 3. Откройте node `Отправка email`.
-4. Выберите SMTP credential.
+4. Проверьте или выберите SMTP credential.
 5. Активируйте workflow.
 
 Текущий локальный импорт:
