@@ -21,11 +21,27 @@ function assertLocalesConfig(locales) {
   if (!locales || typeof locales !== 'object' || Array.isArray(locales)) {
     throw new Error(`${LOCALES_PATH} must contain an object`);
   }
-  if (locales.default_locale !== 'en') {
-    throw new Error(`${LOCALES_PATH} default_locale must be en`);
+  if (typeof locales.default_locale !== 'string' || !locales.default_locale.trim()) {
+    throw new Error(`${LOCALES_PATH} default_locale must be a non-empty string`);
   }
-  if (!Array.isArray(locales.supported_locales) || !locales.supported_locales.includes(locales.default_locale)) {
+  if (
+    !Array.isArray(locales.supported_locales) ||
+    locales.supported_locales.some((locale) => typeof locale !== 'string' || !locale.trim())
+  ) {
+    throw new Error(`${LOCALES_PATH} supported_locales must contain non-empty strings`);
+  }
+  const supportedLocales = locales.supported_locales.map((locale) => locale.trim().toLowerCase());
+  if (new Set(supportedLocales).size !== supportedLocales.length) {
+    throw new Error(`${LOCALES_PATH} supported_locales must not contain duplicates`);
+  }
+  if (!supportedLocales.includes(locales.default_locale.trim().toLowerCase())) {
     throw new Error(`${LOCALES_PATH} supported_locales must include default_locale`);
+  }
+  if (
+    locales.default_locale_env !== undefined &&
+    (typeof locales.default_locale_env !== 'string' || !locales.default_locale_env.trim())
+  ) {
+    throw new Error(`${LOCALES_PATH} default_locale_env must be a non-empty string`);
   }
   if (!locales.overlays || typeof locales.overlays !== 'object' || Array.isArray(locales.overlays)) {
     throw new Error(`${LOCALES_PATH} overlays must contain an object`);
@@ -53,9 +69,32 @@ function buildCode(openapi, locales) {
     '',
     "const input = $input.first().json || {};",
     'const query = input.query || input.queryParameters || {};',
+    "const env = typeof $env !== 'undefined' ? $env : {};",
+    "const envValue = (name) => (env && env[name]) || (typeof process !== 'undefined' ? process.env[name] : '') || '';",
+    "const normalizeLocale = (value) => String(value || '').trim().toLowerCase();",
+    'const supportedLocales = (localeConfig.supported_locales || [localeConfig.default_locale]).map(normalizeLocale);',
+    "const defaultLocaleEnvName = localeConfig.default_locale_env || 'N8N_OPENAPI_DEFAULT_LOCALE';",
+    'const configuredDefaultLocale = normalizeLocale(envValue(defaultLocaleEnvName) || localeConfig.default_locale);',
+    '',
+    'if (!supportedLocales.includes(configuredDefaultLocale)) {',
+    '  return [{',
+    '    json: {',
+    '      statusCode: 500,',
+    '      response: {',
+    '        error: {',
+    "          code: 'invalid_default_locale',",
+    "          message: 'Configured default OpenAPI locale is unsupported.',",
+    '          environment_variable: defaultLocaleEnvName,',
+    '          locale: configuredDefaultLocale,',
+    '          supported_locales: supportedLocales',
+    '        }',
+    '      }',
+    '    }',
+    '  }];',
+    '}',
+    '',
     "const rawLang = Array.isArray(query.lang) ? query.lang[0] : query.lang;",
-    "const requestedLocale = String(rawLang || localeConfig.default_locale).trim().toLowerCase();",
-    'const supportedLocales = localeConfig.supported_locales || [localeConfig.default_locale];',
+    'const requestedLocale = normalizeLocale(rawLang || configuredDefaultLocale);',
     '',
     'if (!supportedLocales.includes(requestedLocale)) {',
     '  return [{',

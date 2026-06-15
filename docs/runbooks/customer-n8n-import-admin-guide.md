@@ -86,7 +86,7 @@
 
 | Workflow export | Workflow name в n8n | Endpoint | Credentials/env |
 | --- | --- | --- | --- |
-| `workflows/contracts-openapi-webhook.json` | `Contracts: OpenAPI discovery` | `GET /webhook/contracts/openapi.json` | Credentials не нужны. Token не нужен. |
+| `workflows/contracts-openapi-webhook.json` | `Contracts: OpenAPI discovery` | `GET /webhook/contracts/openapi.json` | Credentials не нужны. Token не нужен. Язык по умолчанию `ru`; опционально `N8N_OPENAPI_DEFAULT_LOCALE=ru|en` и env access для Code node, например `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`, если этого требует версия n8n. |
 | `workflows/email-template-catalog-webhook.json` | `Contracts: Email template catalog` | `GET /webhook/contracts/email-templates.json` | Credentials не нужны. Token не нужен. |
 | `workflows/send-email-webhook.json` | `Email: отправка письма через webhook` | `POST /webhook/email/send` | `N8N_WEBHOOK_TOKEN`; SMTP credential на node `Отправка email`; опционально `N8N_MAIL_FROM`. |
 | `workflows/send-templated-email-webhook.json` | `Email: отправка письма по шаблону` | `POST /webhook/email/send-template` | `N8N_WEBHOOK_TOKEN`; SMTP credential на node `Отправка email`; `contracts/email-template-catalog.json` как source of truth. |

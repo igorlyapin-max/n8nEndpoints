@@ -88,7 +88,9 @@ http://127.0.0.1:5678/webhook/contracts/openapi.json
 
 - n8n must expose the production webhook base `http://127.0.0.1:5678/webhook`.
 - Contract discovery does not require `N8N_WEBHOOK_TOKEN`.
-- Contract discovery supports `?lang=en` and `?lang=ru`; omitted `lang` defaults to `en`.
+- Contract discovery supports `?lang=en` and `?lang=ru`; omitted `lang` defaults to `ru`.
+- Deployment may override the omitted-`lang` default with `N8N_OPENAPI_DEFAULT_LOCALE=ru|en`.
+- If the deployment overrides the default through env, n8n Code node env access must allow reading it, for example `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` when required by the installed n8n version.
 - Action endpoints described in the contract still require `X-ServiceDesk-Token`.
 - `contracts/n8n-openapi.json` publishes `x-transport-security`: administrators choose the concrete HTTP URLs through runtime configuration; production HTTP webhook/callback URLs should be HTTPS.
 - Kafka result delivery is secured through Kafka credentials and broker controls, not HTTPS. Production Kafka credentials must use `SASL_SSL` or `SSL` with mTLS unless the customer security policy explicitly approves another transport.
@@ -133,6 +135,7 @@ Runtime checks:
 ```bash
 curl -fsS http://127.0.0.1:5678/healthz
 curl -fsS http://127.0.0.1:5678/webhook/contracts/openapi.json | jq '.openapi,.paths'
+curl -fsS http://127.0.0.1:5678/webhook/contracts/openapi.json | jq '.info.description'
 curl -fsS http://127.0.0.1:5678/webhook/contracts/openapi.json?lang=en | jq '.info.description'
 curl -fsS http://127.0.0.1:5678/webhook/contracts/openapi.json?lang=ru | jq '.info.description'
 curl -i http://127.0.0.1:5678/webhook/contracts/openapi.json?lang=de
@@ -141,13 +144,13 @@ curl -i http://127.0.0.1:5678/webhook/contracts/openapi.json?lang=de
 Source-of-truth drift check:
 
 ```bash
-curl -fsS http://127.0.0.1:5678/webhook/contracts/openapi.json -o /tmp/n8n-openapi-live.json
+curl -fsS http://127.0.0.1:5678/webhook/contracts/openapi.json?lang=en -o /tmp/n8n-openapi-live.en.json
 jq -S . contracts/n8n-openapi.json > /tmp/n8n-openapi-local.sorted.json
-jq -S . /tmp/n8n-openapi-live.json > /tmp/n8n-openapi-live.sorted.json
+jq -S . /tmp/n8n-openapi-live.en.json > /tmp/n8n-openapi-live.sorted.json
 diff -u /tmp/n8n-openapi-local.sorted.json /tmp/n8n-openapi-live.sorted.json
 ```
 
-The drift check intentionally uses the default English response. The Russian response is generated from `contracts/n8n-openapi.locales.json` and should be validated through `node scripts/test-contracts.mjs` plus the `?lang=ru` runtime smoke.
+The drift check intentionally uses `?lang=en` because `contracts/n8n-openapi.json` is the base English source. With repository defaults the omitted-`lang` response is Russian and generated from `contracts/n8n-openapi.locales.json`. Validate both locales through `node scripts/test-contracts.mjs` plus the explicit `?lang=en` and `?lang=ru` runtime smoke checks.
 
 ## Rollback
 

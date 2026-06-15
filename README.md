@@ -28,10 +28,11 @@ Machine-readable contract для внешних приложений:
 - n8n contract workflow: `workflows/contracts-openapi-webhook.json`
 - Contract URL: `http://127.0.0.1:5678/webhook/contracts/openapi.json`
 - Optional language selector: `http://127.0.0.1:5678/webhook/contracts/openapi.json?lang=ru`
+- Язык по умолчанию: `ru`; при развертывании можно задать `N8N_OPENAPI_DEFAULT_LOCALE=ru|en`.
 - Usage: `docs/runbooks/contract-discovery-usage.md`
 - Deployment: `docs/runbooks/contract-discovery-deployment.md`
 
-`lang=ru|en` changes only OpenAPI human-readable metadata. Paths, `operationId`, payload fields, enum values, error codes and auth headers stay identical.
+`lang=ru|en` changes only OpenAPI human-readable metadata and has priority over deployment default. Paths, `operationId`, payload fields, enum values, error codes and auth headers stay identical.
 
 Transport security публикуется в OpenAPI как `x-transport-security`. HTTP URL для n8n и callback выбирает администратор через `N8N_WEBHOOK_BASE_URL` и `ORCHESTRATOR_PUBLIC_URL`; для HTTP callback вне local/dev `ORCHESTRATOR_PUBLIC_URL` обязателен. Local/dev может использовать `http://127.0.0.1`, production должен публиковаться через `https://`. Kafka не использует HTTPS: production delivery настраивается через Kafka credential/ACL с `SASL_SSL` или `SSL`/mTLS.
 

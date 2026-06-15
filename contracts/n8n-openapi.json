@@ -8,7 +8,8 @@
   "x-localization": {
     "selection": "query_parameter",
     "query_parameter": "lang",
-    "default_locale": "en",
+    "default_locale": "ru",
+    "default_locale_env": "N8N_OPENAPI_DEFAULT_LOCALE",
     "supported_locales": [
       "en",
       "ru"
@@ -104,14 +105,14 @@
             "name": "lang",
             "in": "query",
             "required": false,
-            "description": "Language for human-readable descriptions in the OpenAPI document. Defaults to en when omitted.",
+            "description": "Language for human-readable descriptions in the OpenAPI document. Defaults to the deployment default: N8N_OPENAPI_DEFAULT_LOCALE or ru.",
             "schema": {
               "type": "string",
               "enum": [
                 "en",
                 "ru"
               ],
-              "default": "en"
+              "default": "ru"
             }
           }
         ],
@@ -139,6 +140,31 @@
                       "error": {
                         "code": "unsupported_locale",
                         "message": "Unsupported lang query parameter.",
+                        "locale": "de",
+                        "supported_locales": [
+                          "en",
+                          "ru"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Invalid OpenAPI contract default locale configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "invalidDefaultLocale": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_default_locale",
+                        "message": "N8N_OPENAPI_DEFAULT_LOCALE is not supported.",
                         "locale": "de",
                         "supported_locales": [
                           "en",

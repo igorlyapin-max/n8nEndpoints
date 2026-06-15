@@ -1,6 +1,7 @@
 {
   "schema_version": "1.0",
-  "default_locale": "en",
+  "default_locale": "ru",
+  "default_locale_env": "N8N_OPENAPI_DEFAULT_LOCALE",
   "supported_locales": [
     "en",
     "ru"
@@ -22,9 +23,10 @@
       "/tags/4/description": "Операционные runbook webhooks",
       "/paths/~1webhook~1contracts~1openapi.json/get/summary": "Получить OpenAPI контракт n8n webhooks",
       "/paths/~1webhook~1contracts~1openapi.json/get/description": "Возвращает машиночитаемый контракт, по которому внешние приложения находят execution endpoints и схемы payload.",
-      "/paths/~1webhook~1contracts~1openapi.json/get/parameters/0/description": "Язык human-readable описаний в OpenAPI документе. Если параметр отсутствует, используется en.",
+      "/paths/~1webhook~1contracts~1openapi.json/get/parameters/0/description": "Язык человекочитаемых описаний в OpenAPI документе. Если параметр отсутствует, используется значение по умолчанию развертывания: N8N_OPENAPI_DEFAULT_LOCALE или ru.",
       "/paths/~1webhook~1contracts~1openapi.json/get/responses/200/description": "OpenAPI контракт",
-      "/paths/~1webhook~1contracts~1openapi.json/get/responses/400/description": "Неподдерживаемый язык OpenAPI contract",
+      "/paths/~1webhook~1contracts~1openapi.json/get/responses/400/description": "Неподдерживаемый язык OpenAPI контракта",
+      "/paths/~1webhook~1contracts~1openapi.json/get/responses/500/description": "Некорректная конфигурация языка OpenAPI контракта по умолчанию",
       "/paths/~1webhook~1contracts~1email-templates.json/get/summary": "Получить каталог email-шаблонов",
       "/paths/~1webhook~1contracts~1email-templates.json/get/description": "Возвращает repo-backed каталог email-шаблонов, используемый endpoint отправки писем по шаблону.",
       "/paths/~1webhook~1contracts~1email-templates.json/get/responses/200/description": "Каталог email-шаблонов",
@@ -107,8 +109,8 @@
       "/components/schemas/GetProviderEmailContextResponse/properties/city/description": "Building.City, найденный через routerG.Location -> Room.Floor -> Floor.Building.",
       "/components/schemas/GetProviderEmailContextResponse/properties/location/description": "Room.Description, найденный из routerG.Location.",
       "/components/schemas/GetProviderEmailContextResponse/properties/ip_address/description": "IpAddress.Description, найденный из routerG.ipaddress.",
-      "/components/schemas/GetProviderEmailContextResponse/properties/contract/description": "routerG.contract.",
-      "/components/schemas/GetProviderEmailContextResponse/properties/provider_email/description": "routerG.email.",
+      "/components/schemas/GetProviderEmailContextResponse/properties/contract/description": "Значение routerG.contract.",
+      "/components/schemas/GetProviderEmailContextResponse/properties/provider_email/description": "Email провайдера из routerG.email.",
       "/tags/5/description": "Runbook-и проверки кадровой выгрузки",
       "/tags/6/description": "Runbook-и чтения Active Directory",
       "/paths/~1webhook~1hr~1verify-manager/post/summary": "Проверить пару сотрудник-руководитель по кадровой выгрузке",

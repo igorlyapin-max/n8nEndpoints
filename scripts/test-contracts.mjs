@@ -2683,7 +2683,8 @@ function testOpenApiAndCatalog() {
   const openapi = readJson('contracts/n8n-openapi.json');
   assert.equal(openapi['x-localization'].selection, 'query_parameter');
   assert.equal(openapi['x-localization'].query_parameter, 'lang');
-  assert.equal(openapi['x-localization'].default_locale, 'en');
+  assert.equal(openapi['x-localization'].default_locale, 'ru');
+  assert.equal(openapi['x-localization'].default_locale_env, 'N8N_OPENAPI_DEFAULT_LOCALE');
   assert.deepEqual(openapi['x-localization'].supported_locales, ['en', 'ru']);
   assert.equal(openapi['x-transport-security'].http.policy, 'admin_configured');
   assert.equal(openapi['x-transport-security'].http.production_recommended_scheme, 'https');
@@ -2707,8 +2708,9 @@ function testOpenApiAndCatalog() {
   const discoveryOperation = openapi.paths['/webhook/contracts/openapi.json'].get;
   assert.equal(discoveryOperation.operationId, 'getN8nOpenApiContract');
   assert.deepEqual(discoveryOperation.parameters[0].schema.enum, ['en', 'ru']);
-  assert.equal(discoveryOperation.parameters[0].schema.default, 'en');
+  assert.equal(discoveryOperation.parameters[0].schema.default, 'ru');
   assert.ok(discoveryOperation.responses['400'].content['application/json'].examples.unsupportedLocale);
+  assert.ok(discoveryOperation.responses['500'].content['application/json'].examples.invalidDefaultLocale);
 
   const zabbixRequest = openapi.components.schemas.UpdateZabbixProblemRequest;
   assert.deepEqual(zabbixRequest.required, ['message']);
@@ -3146,9 +3148,16 @@ async function testContractDiscoveryLocalization() {
 
   const defaultResponse = responseOf(await run({ query: {} }));
   assert.equal(defaultResponse.statusCode, 200);
-  assert.equal(defaultResponse.response['x-localization'].default_locale, 'en');
+  assert.equal(defaultResponse.response['x-localization'].default_locale, 'ru');
   assert.equal(
     defaultResponse.response.info.description,
+    'Машиночитаемый контракт для внешне вызываемых n8n webhook в локальном integration adapter ServiceDesk.',
+  );
+
+  const envDefaultEnResponse = responseOf(await run({ query: {} }, { N8N_OPENAPI_DEFAULT_LOCALE: 'en' }));
+  assert.equal(envDefaultEnResponse.statusCode, 200);
+  assert.equal(
+    envDefaultEnResponse.response.info.description,
     'Machine-readable contract for externally callable n8n webhooks in the local ServiceDesk integration adapter.',
   );
 
@@ -3242,6 +3251,15 @@ async function testContractDiscoveryLocalization() {
   assert.equal(unsupported.statusCode, 400);
   assert.equal(unsupported.response.error.code, 'unsupported_locale');
   assert.deepEqual(unsupported.response.error.supported_locales, ['en', 'ru']);
+
+  const invalidDefault = responseOf(
+    await run({ query: { lang: 'ru' } }, { N8N_OPENAPI_DEFAULT_LOCALE: 'de' }),
+  );
+  assert.equal(invalidDefault.statusCode, 500);
+  assert.equal(invalidDefault.response.error.code, 'invalid_default_locale');
+  assert.equal(invalidDefault.response.error.environment_variable, 'N8N_OPENAPI_DEFAULT_LOCALE');
+  assert.equal(invalidDefault.response.error.locale, 'de');
+  assert.deepEqual(invalidDefault.response.error.supported_locales, ['en', 'ru']);
 }
 
 function testWorkflowInlineDocumentation() {

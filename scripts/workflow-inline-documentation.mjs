@@ -4,19 +4,19 @@ const WORKFLOW_DOCUMENTATION = {
   contractsOpenApi: {
     description: [
       'Логика работы: публикует machine-readable OpenAPI contract для всех внешне вызываемых n8n endpoints этого проекта.',
-      'Workflow принимает GET /webhook/contracts/openapi.json, применяет optional lang=en|ru к human-facing metadata и возвращает контракт без авторизации.',
-      'Отладка: после изменения contracts/n8n-openapi.json или contracts/n8n-openapi.locales.json выполнить node scripts/build-contract-workflow.mjs, затем node scripts/build-contract-workflow.mjs --check и curl /webhook/contracts/openapi.json?lang=ru.',
+      'Workflow принимает GET /webhook/contracts/openapi.json, применяет optional lang=en|ru к человекочитаемым метаданным и возвращает контракт без авторизации; язык по умолчанию ru можно переопределить через N8N_OPENAPI_DEFAULT_LOCALE.',
+      'Отладка: после изменения contracts/n8n-openapi.json или contracts/n8n-openapi.locales.json выполнить node scripts/build-contract-workflow.mjs, затем node scripts/build-contract-workflow.mjs --check и curl /webhook/contracts/openapi.json.',
     ],
     nodes: {
       'Webhook контракта OpenAPI': {
-        does: 'Принимает GET-запрос discovery endpoint /webhook/contracts/openapi.json с optional query lang=en|ru.',
+        does: 'Принимает GET-запрос discovery endpoint /webhook/contracts/openapi.json с optional query lang=en|ru; без lang используется ru или N8N_OPENAPI_DEFAULT_LOCALE.',
         reliesOn: 'n8n production webhook registration и активный workflow Contracts: OpenAPI discovery.',
-        errors: 'До импорта или activation production webhook вернет 404; unsupported lang вернет 400; endpoint не требует X-ServiceDesk-Token.',
+        errors: 'До импорта или activation production webhook вернет 404; неподдерживаемый lang вернет 400; некорректный N8N_OPENAPI_DEFAULT_LOCALE вернет 500; endpoint не требует X-ServiceDesk-Token.',
       },
       'Подготовка OpenAPI контракта': {
         does: 'Возвращает OpenAPI JSON, встроенный generator script из contracts/n8n-openapi.json и locale overlays.',
         reliesOn: 'Source of truth contracts/n8n-openapi.json, contracts/n8n-openapi.locales.json и актуальный запуск scripts/build-contract-workflow.mjs.',
-        errors: 'Drift между contract/locale files и workflow export ловится node scripts/build-contract-workflow.mjs --check; unknown locale возвращает unsupported_locale.',
+        errors: 'Drift между contract/locale files и workflow export ловится node scripts/build-contract-workflow.mjs --check; неизвестный lang возвращает unsupported_locale, некорректный язык развертывания по умолчанию возвращает invalid_default_locale.',
       },
       'Ответ OpenAPI контракта': {
         does: 'Отдает caller JSON response со statusCode из предыдущего Code node.',
