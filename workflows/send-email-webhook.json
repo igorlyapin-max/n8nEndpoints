@@ -183,7 +183,7 @@
     },
     {
       "parameters": {
-        "content": "### Отправка email\n\nДелает: Отправляет plain text email через SMTP credential.\n\nОпирается на: SMTP credential, обязательные from/replyTo из payload, prepared from/replyTo/toEmail/subject/body.\n\nОшибки/ветки: SMTP failures передаются в result node благодаря continueOnFail.",
+        "content": "### Отправка email\n\nДелает: Отправляет plain text email через SMTP credential.\n\nОпирается на: SMTP credential, обязательные from/replyTo из payload и prepared toEmail/subject/body.\n\nОшибки/ветки: SMTP failures передаются в result node благодаря continueOnFail.",
         "height": 180,
         "width": 360,
         "color": 7

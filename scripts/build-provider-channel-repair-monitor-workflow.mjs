@@ -648,7 +648,11 @@ return [{
 }];`;
 
 const asyncDoneCode = "return [{ json: { delivered: true, status: $input.first().json.externalEvent?.status || 'unknown' } }];";
-const progressDoneCode = "return [{ json: { ...($input.first().json || {}), progress_delivered: true } }];";
+const progressDoneCode = String.raw`const progressState = $('Доставка polling diagnostics').first().json || $input.first().json || {};
+if (!progressState.next_wait_at || Number.isNaN(Date.parse(progressState.next_wait_at))) {
+  throw new Error('next_wait_at is required before provider monitor wait.');
+}
+return [{ json: { ...progressState, progress_delivered: true } }];`;
 
 function terminalErrorCode() {
   return String.raw`const baseState = (state) => ({

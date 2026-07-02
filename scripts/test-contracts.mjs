@@ -2481,6 +2481,10 @@ async function testProviderChannelRepairMonitor() {
     'workflows/provider-channel-repair-monitor-webhook.json',
     'provider-channel-monitor-deliver-result',
   );
+  const progressDoneCode = codeNode(
+    'workflows/provider-channel-repair-monitor-webhook.json',
+    'provider-channel-monitor-progress-done',
+  );
   const env = {
     N8N_WEBHOOK_TOKEN: 'test-token',
     N8N_INTERNAL_WEBHOOK_BASE_URL: 'http://127.0.0.1:5678/webhook',
@@ -2931,6 +2935,14 @@ async function testProviderChannelRepairMonitor() {
     'case-000000000001:tool_command:cmd-provider-monitor-123:provider_channel_repair_progress_1',
   );
   assert.equal(progressEvent.shouldPublishKafka, true);
+  const progressDone = responseOf(
+    await runner(progressDoneCode, {
+      $: nodeLookup({ 'Доставка polling diagnostics': progressEvent }),
+    })({ kafka_write_result: { offset: 1 } }),
+  );
+  assert.equal(progressDone.progress_delivered, true);
+  assert.equal(progressDone.next_wait_at, waiting.next_wait_at);
+  assert.ok(Date.parse(progressDone.next_wait_at) > Date.now());
 
   assertMainConnectionIncludes(
     'workflows/provider-channel-repair-monitor-webhook.json',
@@ -3314,8 +3326,18 @@ function testOpenApiAndCatalog() {
   assert.equal(providerMonitorRequest.properties.poll_interval_minutes.maximum, 60);
   assert.equal(providerMonitorRequest.properties.timeout_minutes.maximum, 240);
   assert.equal(providerMonitorRequest.properties.templateId.default, 'provider_channel_outage_test');
-  assert.ok(openapi.components.schemas.MonitorProviderChannelRepairResult.properties.router_lookup_status);
-  assert.ok(openapi.components.schemas.MonitorProviderChannelRepairResult.properties.router_candidates);
+  const providerMonitorResult = openapi.components.schemas.MonitorProviderChannelRepairResult;
+  assert.ok(providerMonitorResult.properties.router_lookup_status);
+  assert.ok(providerMonitorResult.properties.router_candidates);
+  assert.deepEqual(providerMonitorResult.properties.email_result.oneOf, [
+    { $ref: '#/components/schemas/WaitForEmailByTicketResult' },
+    { type: 'null' },
+  ]);
+  const waitForEmailResult = openapi.components.schemas.WaitForEmailByTicketResult;
+  assert.ok(waitForEmailResult.properties.body);
+  assert.ok(waitForEmailResult.properties.subject);
+  assert.ok(waitForEmailResult.properties.match_count);
+  assert.ok(waitForEmailResult.properties.ticket_number);
   assert.deepEqual(openapi.components.schemas.MonitorProviderChannelRepairResultStatus.enum, [
     'RESOLVED',
     'OK',

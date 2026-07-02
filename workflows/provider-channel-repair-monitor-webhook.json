@@ -608,7 +608,7 @@
     },
     {
       "parameters": {
-        "jsCode": "return [{ json: { ...($input.first().json || {}), progress_delivered: true } }];"
+        "jsCode": "const progressState = $('Доставка polling diagnostics').first().json || $input.first().json || {};\nif (!progressState.next_wait_at || Number.isNaN(Date.parse(progressState.next_wait_at))) {\n  throw new Error('next_wait_at is required before provider monitor wait.');\n}\nreturn [{ json: { ...progressState, progress_delivered: true } }];"
       },
       "id": "provider-channel-monitor-progress-done",
       "name": "Завершение polling diagnostics",
