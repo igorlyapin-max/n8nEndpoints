@@ -236,9 +236,10 @@
                     "bcc": [
                       "bcc@local.test"
                     ],
-                    "replyTo": "sender@local.test",
+                    "replyTo": "automation-test@local.test",
                     "subject": "n8n webhook send smoke",
-                    "body": "Webhook send smoke via GreenMail"
+                    "body": "Webhook send smoke via GreenMail",
+                    "from": "automation-test@local.test"
                   }
                 }
               }
@@ -284,6 +285,22 @@
                       "error": {
                         "code": "attachments_not_supported",
                         "message": "Attachments are not supported in v1."
+                      }
+                    }
+                  },
+                  "missingFrom": {
+                    "value": {
+                      "error": {
+                        "code": "missing_from",
+                        "message": "Поле from обязательно."
+                      }
+                    }
+                  },
+                  "missingReplyTo": {
+                    "value": {
+                      "error": {
+                        "code": "missing_reply_to",
+                        "message": "Поле replyTo обязательно."
                       }
                     }
                   }
@@ -344,7 +361,7 @@
                     "cc": [
                       "cc@local.test"
                     ],
-                    "replyTo": "sender@local.test",
+                    "replyTo": "automation-test@local.test",
                     "templateId": "provider_line_repair_request",
                     "params": {
                       "localTicketNumber": "ГКМ12345678",
@@ -355,7 +372,8 @@
                       "contactPhone": "+7 999 000-00-00",
                       "impact": "Полная недоступность сервиса",
                       "preferredContactHours": "09:00-18:00 МСК"
-                    }
+                    },
+                    "from": "automation-test@local.test"
                   }
                 }
               }
@@ -445,6 +463,22 @@
                         "code": "rendered_body_too_long",
                         "message": "После подстановки шаблона тело письма слишком длинное.",
                         "templateId": "provider_channel_outage_test"
+                      }
+                    }
+                  },
+                  "missingFrom": {
+                    "value": {
+                      "error": {
+                        "code": "missing_from",
+                        "message": "Поле from обязательно."
+                      }
+                    }
+                  },
+                  "missingReplyTo": {
+                    "value": {
+                      "error": {
+                        "code": "missing_reply_to",
+                        "message": "Поле replyTo обязательно."
                       }
                     }
                   }
@@ -1330,7 +1364,7 @@
           "zabbix"
         ],
         "summary": "Send a provider channel repair email and monitor Zabbix/email completion",
-        "description": "Async-only composite runbook. It resolves provider email context from CMDBuild by host, sends the provider_channel_outage_test templated email, then polls Zabbix first and provider mailbox index second until Zabbix is ok/resolved, a provider reply is found, delivery fails, or timeout expires. The HTTP response is accepted; terminal business result is delivered as canonical ServiceDesk ExternalEvent.result.",
+        "description": "Async-only composite runbook. It resolves provider email context from CMDBuild by host, sends a provider repair email through the workflow SMTP node, then polls Zabbix first and provider mailbox index second until Zabbix is ok/resolved, a provider reply is found, delivery fails, or timeout expires. The HTTP response is accepted; terminal business result is delivered as canonical ServiceDesk ExternalEvent.result.",
         "x-result-delivery": {
           "canonical_event": "ServiceDesk ExternalEvent",
           "async_callback_path": "invocation.extensions.async_callback",
@@ -1379,7 +1413,9 @@
                           "result_topic": "external.events"
                         }
                       }
-                    }
+                    },
+                    "from": "automation-test@local.test",
+                    "replyTo": "automation-test@local.test"
                   }
                 }
               }
@@ -1454,6 +1490,22 @@
                         "message": "result_topic обязателен для kafka_event или both."
                       }
                     }
+                  },
+                  "missingFrom": {
+                    "value": {
+                      "error": {
+                        "code": "missing_from",
+                        "message": "Поле from обязательно."
+                      }
+                    }
+                  },
+                  "missingReplyTo": {
+                    "value": {
+                      "error": {
+                        "code": "missing_reply_to",
+                        "message": "Поле replyTo обязательно."
+                      }
+                    }
                   }
                 }
               }
@@ -1480,7 +1532,7 @@
           "runbooks"
         ],
         "summary": "Get provider email context from CMDBuild by router hostname",
-        "description": "Finds an active routerG card by exact Description/hostname and returns the fields required to render a provider email template. The workflow is read-only and does not send email.",
+        "description": "Finds an active routerG card by exact Description, hostname or Code and returns the fields required to render a provider email. The workflow is read-only and does not send email.",
         "security": [
           {
             "ServiceDeskWebhookToken": []
@@ -1559,7 +1611,7 @@
             }
           },
           "404": {
-            "description": "routerG card was not found by exact Description.",
+            "description": "routerG card was not found by exact Description, hostname or Code.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1570,7 +1622,7 @@
                     "value": {
                       "error": {
                         "code": "router_not_found",
-                        "message": "routerG не найден по Description."
+                        "message": "routerG не найден по Description, hostname или Code."
                       }
                     }
                   }
@@ -2588,6 +2640,7 @@
         "additionalProperties": true,
         "required": [
           "to",
+          "from",
           "subject",
           "body"
         ],
@@ -2611,7 +2664,8 @@
           },
           "replyTo": {
             "type": "string",
-            "format": "email"
+            "format": "email",
+            "description": "Reply-To address passed by the caller. Provider response workflows use this as the reply mailbox."
           },
           "reply_to": {
             "type": "string",
@@ -2626,6 +2680,11 @@
             "type": "string",
             "minLength": 1,
             "description": "Plain text email body."
+          },
+          "from": {
+            "type": "string",
+            "format": "email",
+            "description": "SMTP From address passed by the caller."
           }
         },
         "not": {
@@ -2646,13 +2705,26 @@
               ]
             }
           ]
-        }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "replyTo"
+            ]
+          },
+          {
+            "required": [
+              "reply_to"
+            ]
+          }
+        ]
       },
       "SendTemplatedEmailRequest": {
         "type": "object",
         "additionalProperties": true,
         "required": [
           "to",
+          "from",
           "templateId",
           "params"
         ],
@@ -2676,7 +2748,8 @@
           },
           "replyTo": {
             "type": "string",
-            "format": "email"
+            "format": "email",
+            "description": "Reply-To address passed by the caller."
           },
           "reply_to": {
             "type": "string",
@@ -2690,6 +2763,11 @@
           },
           "params": {
             "$ref": "#/components/schemas/TemplateParams"
+          },
+          "from": {
+            "type": "string",
+            "format": "email",
+            "description": "SMTP From address passed by the caller."
           }
         },
         "not": {
@@ -2710,7 +2788,19 @@
               ]
             }
           ]
-        }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "replyTo"
+            ]
+          },
+          {
+            "required": [
+              "reply_to"
+            ]
+          }
+        ]
       },
       "SendEmailResponse": {
         "type": "object",
@@ -3641,6 +3731,13 @@
           },
           "delivery_status": {
             "$ref": "#/components/schemas/ExternalEventDeliveryStatus"
+          },
+          "mailbox_address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Address of the indexed mailbox that received the message, when the collector can determine it."
           }
         }
       },
@@ -3648,11 +3745,32 @@
         "type": "object",
         "additionalProperties": true,
         "required": [
-          "invocation"
+          "invocation",
+          "from"
         ],
         "allOf": [
           {
             "anyOf": [
+              {
+                "required": [
+                  "problem_host"
+                ]
+              },
+              {
+                "required": [
+                  "problemHost"
+                ]
+              },
+              {
+                "required": [
+                  "router_ref"
+                ]
+              },
+              {
+                "required": [
+                  "routerRef"
+                ]
+              },
               {
                 "required": [
                   "host"
@@ -3725,26 +3843,64 @@
                 ]
               }
             ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "replyTo"
+                ]
+              },
+              {
+                "required": [
+                  "reply_to"
+                ]
+              }
+            ]
           }
         ],
         "properties": {
+          "problem_host": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Host or object name from the incoming problem/Zabbix alert. This is not guaranteed to be a routerG reference. The workflow also accepts problemHost."
+          },
+          "problemHost": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Alias accepted by the workflow for problem_host."
+          },
+          "router_ref": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Exact routerG Description, hostname or Code value used by CMDBuild provider context lookup. Prefer this field when the scenario already resolved the provider router."
+          },
+          "routerRef": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "Alias accepted by the workflow for router_ref."
+          },
           "host": {
             "type": "string",
             "minLength": 1,
             "maxLength": 500,
-            "description": "Exact routerG Description value used by CMDBuild provider context lookup. The workflow also accepts hostname and hostName aliases."
+            "description": "Backward-compatible alias accepted as problem_host. Use router_ref for exact routerG lookup."
           },
           "hostname": {
             "type": "string",
             "minLength": 1,
             "maxLength": 500,
-            "description": "Alias accepted by the workflow for host."
+            "description": "Backward-compatible alias accepted as problem_host."
           },
           "hostName": {
             "type": "string",
             "minLength": 1,
             "maxLength": 500,
-            "description": "Alias accepted by the workflow for host."
+            "description": "Backward-compatible alias accepted as problem_host."
           },
           "problemUrl": {
             "type": "string",
@@ -3809,7 +3965,8 @@
           },
           "replyTo": {
             "type": "string",
-            "format": "email"
+            "format": "email",
+            "description": "Reply-To address. The provider reply search is filtered by this mailbox address."
           },
           "reply_to": {
             "type": "string",
@@ -3827,6 +3984,11 @@
           "invocation": {
             "$ref": "#/components/schemas/RunbookInvocation",
             "description": "Async invocation package. action_id must be monitor_provider_channel_repair and invocation.extensions.async_callback is required."
+          },
+          "from": {
+            "type": "string",
+            "format": "email",
+            "description": "SMTP From address for the provider email."
           }
         },
         "not": {
@@ -3940,6 +4102,56 @@
           "host": {
             "type": "string"
           },
+          "problem_host": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "router_ref": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "router_lookup_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "resolved",
+              "not_found",
+              "not_unique",
+              "error",
+              null
+            ],
+            "description": "Result of resolving the problem host/router_ref to a CMDBuild routerG object."
+          },
+          "router_lookup_source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "router_ref",
+              "problem_host",
+              null
+            ]
+          },
+          "router_lookup_value": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "router_candidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
           "problemUrl": {
             "type": "string",
             "format": "uri"
@@ -4006,6 +4218,27 @@
           },
           "delivery_status": {
             "$ref": "#/components/schemas/ExternalEventDeliveryStatus"
+          },
+          "reply_mailbox_address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Mailbox address used to filter provider replies; copied from replyTo."
+          },
+          "from": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "SMTP From address used by the provider email dispatch."
+          },
+          "reply_to": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Reply-To address used by the provider email dispatch."
           }
         }
       },
@@ -4020,7 +4253,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 500,
-            "description": "Exact routerG Description value. The workflow also accepts hostName."
+            "description": "Exact routerG Description, hostname or Code value. The workflow also accepts hostName."
           },
           "hostName": {
             "type": "string",

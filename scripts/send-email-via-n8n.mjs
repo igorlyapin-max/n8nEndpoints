@@ -30,9 +30,10 @@ Options:
   --to <email>          Required. Can be repeated or comma-separated.
   --cc <email>          Optional. Can be repeated or comma-separated.
   --bcc <email>         Optional. Can be repeated or comma-separated.
+  --from <email>        Required SMTP From address.
+  --reply-to <email>    Required Reply-To address.
   --subject <text>      Required.
   --body <text>         Required.
-  --reply-to <email>    Optional.
   --help                Show this help.
 
 Environment:
@@ -117,6 +118,7 @@ function parseArgs(argv) {
     bcc: [],
     subject: '',
     body: '',
+    from: '',
     replyTo: '',
   };
 
@@ -159,6 +161,10 @@ function parseArgs(argv) {
         if (value === undefined) throw new UsageError('Missing value for --body.');
         parsed.body = value;
         break;
+      case 'from':
+        if (value === undefined) throw new UsageError('Missing value for --from.');
+        parsed.from = value.trim();
+        break;
       case 'reply-to':
       case 'replyTo':
         if (value === undefined) throw new UsageError(`Missing value for --${flag}.`);
@@ -182,13 +188,16 @@ function validateEmail(value, fieldName) {
 function validateInput(input) {
   if (input.help) return;
   if (input.to.length === 0) throw new UsageError('Missing required --to.');
+  if (!input.from) throw new UsageError('Missing required --from.');
+  if (!input.replyTo) throw new UsageError('Missing required --reply-to.');
   if (!input.subject.trim()) throw new UsageError('Missing required --subject.');
   if (!input.body.trim()) throw new UsageError('Missing required --body.');
 
   input.to.forEach((email) => validateEmail(email, '--to'));
   input.cc.forEach((email) => validateEmail(email, '--cc'));
   input.bcc.forEach((email) => validateEmail(email, '--bcc'));
-  if (input.replyTo) validateEmail(input.replyTo, '--reply-to');
+  validateEmail(input.from, '--from');
+  validateEmail(input.replyTo, '--reply-to');
 }
 
 async function postJson(url, token, payload, timeoutMs) {
@@ -254,12 +263,13 @@ async function main() {
     const payload = {
       request_id: requestId,
       to: input.to,
+      from: input.from,
+      replyTo: input.replyTo,
       subject: input.subject,
       body: input.body,
     };
     if (input.cc.length) payload.cc = input.cc;
     if (input.bcc.length) payload.bcc = input.bcc;
-    if (input.replyTo) payload.replyTo = input.replyTo;
 
     logEvent(debugLevel, 'email_dispatch_request', {
       request_id: requestId,
@@ -267,6 +277,8 @@ async function main() {
       to_count: input.to.length,
       cc_count: input.cc.length,
       bcc_count: input.bcc.length,
+      from: maskEmail(input.from),
+      reply_to: maskEmail(input.replyTo),
       subject_length: input.subject.length,
       body_length: input.body.length,
     });

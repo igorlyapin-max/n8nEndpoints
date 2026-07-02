@@ -56,11 +56,29 @@ if (!/^https?:\/\/[^/?#]+(?:\/[^?#]*)?$/i.test(rawBaseUrl)) {
 const cmdbuildBaseUrl = rawBaseUrl.replace(/\/+$/, '');
 const filter = {
   attribute: {
-    simple: {
-      attribute: 'Description',
-      operator: 'equal',
-      value: [hostname]
-    }
+    or: [
+      {
+        simple: {
+          attribute: 'Description',
+          operator: 'equal',
+          value: [hostname]
+        }
+      },
+      {
+        simple: {
+          attribute: 'hostname',
+          operator: 'equal',
+          value: [hostname]
+        }
+      },
+      {
+        simple: {
+          attribute: 'Code',
+          operator: 'equal',
+          value: [hostname]
+        }
+      }
+    ]
   }
 };
 const routerSearchUrl = cmdbuildBaseUrl + '/services/rest/v3/classes/routerG/cards?limit=2&filter=' + encodeURIComponent(JSON.stringify(filter));
@@ -106,7 +124,7 @@ if (httpStatus >= 400 || body.success === false) {
 const rows = Array.isArray(body.data) ? body.data : [];
 const total = Number(body.meta?.total ?? rows.length);
 if (total === 0 || rows.length === 0) {
-  return response(404, 'router_not_found', 'routerG не найден по Description.', { hostname: requestState.hostname });
+  return response(404, 'router_not_found', 'routerG не найден по Description, hostname или Code.', { hostname: requestState.hostname });
 }
 if (total > 1 || rows.length > 1) {
   return response(409, 'router_not_unique', 'По hostname найдено несколько routerG объектов.', { hostname: requestState.hostname, match_count: total || rows.length });

@@ -24,7 +24,7 @@ Request:
 
 Accepted alias: `hostName`.
 
-`hostname` must exactly match `Description` of one active CMDBuild card in class `routerG`.
+`hostname` must exactly match `Description`, `hostname` or `Code` of one active CMDBuild card in class `routerG`.
 
 ## Response
 
@@ -55,7 +55,7 @@ All fields above are mandatory for `OK`. Empty CMDBuild attributes return `422 m
 
 - `401 unauthorized` - absent or invalid `X-ServiceDesk-Token`.
 - `400 missing_hostname` - request does not contain `hostname`.
-- `404 router_not_found` - no active `routerG` card matched exact `Description`.
+- `404 router_not_found` - no active `routerG` card matched exact `Description`, `hostname` or `Code`.
 - `409 router_not_unique` - more than one `routerG` matched.
 - `422 missing_cmdbuild_field` - required router/reference attribute is empty.
 - `502 cmdbuild_auth_failed` - CMDBuild credentials are invalid or denied.

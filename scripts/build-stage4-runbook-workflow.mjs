@@ -3,8 +3,11 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import process from 'node:process';
 import { documentedWorkflow } from './workflow-inline-documentation.mjs';
+import { serviceDeskEnvironmentExpression } from './servicedesk-async-runbook-runtime.mjs';
 
 const WORKFLOW_PATH = 'workflows/stage4-runbook-webhook.json';
+
+const SERVICE_DESK_ENVIRONMENT_EXPR_DOUBLE = serviceDeskEnvironmentExpression({ quote: '"' });
 
 function stableJson(value) {
   return JSON.stringify(value, null, 2);
@@ -97,7 +100,7 @@ function validateCallbackUrl(value) {
   if (!parsed) return { reason: "invalid_url" };
   if (!["http:", "https:"].includes(parsed.protocol)) return { reason: "invalid_scheme" };
   if (parsed.hasCredentials) return { reason: "credentials_not_allowed" };
-  const envName = stringValue(envValue("NODE_ENV") || envValue("N8N_ENVIRONMENT") || envValue("ENVIRONMENT")).toLowerCase();
+  const envName = stringValue(${SERVICE_DESK_ENVIRONMENT_EXPR_DOUBLE}).toLowerCase();
   const localEnv = !envName || envName === "development" || envName === "dev" || envName === "local" || envName === "test";
   const production = envName === "production" || envName === "prod";
   const hostname = parsed.hostname.toLowerCase();

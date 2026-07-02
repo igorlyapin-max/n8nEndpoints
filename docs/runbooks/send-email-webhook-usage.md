@@ -32,15 +32,16 @@ Body:
 ```json
 {
   "to": ["user@example.com"],
+  "from": "automation-test@local.test",
   "cc": ["manager@example.com"],
   "bcc": ["audit@example.com"],
-  "replyTo": "support@example.com",
+  "replyTo": "automation-test@local.test",
   "subject": "Тема письма",
   "body": "Текст письма"
 }
 ```
 
-`to`, `cc` и `bcc` можно передавать строкой, строкой с разделителями `,` или `;`, либо массивом строк. `cc`, `bcc` и `replyTo` необязательны.
+`to`, `cc` и `bcc` можно передавать строкой, строкой с разделителями `,` или `;`, либо массивом строк. `cc` и `bcc` необязательны; `from` и `replyTo` обязательны.
 
 Attachments в версии v1 не поддерживаются. Если запрос содержит `attachment`, `attachments` или `files`, workflow возвращает `400 attachments_not_supported`.
 
@@ -61,6 +62,8 @@ Attachments в версии v1 не поддерживаются. Если за�
 - `400 missing_subject` - не указана тема.
 - `400 missing_body` - не указано тело письма.
 - `400 invalid_email` - некорректный адрес в `to`, `cc`, `bcc` или `replyTo`.
+- `400 missing_from` - не передан обязательный SMTP From адрес.
+- `400 missing_reply_to` - не передан обязательный Reply-To адрес.
 - `400 attachments_not_supported` - передан attachment.
 - `502 email_send_failed` - SMTP node не смог отправить письмо.
 

@@ -392,11 +392,13 @@
       "default_poll_interval_minutes": 15,
       "default_timeout_minutes": 60,
       "required_inputs": [
-        "host",
+        "problem_host_or_router_ref",
         "problemUrl",
         "service_request",
         "poll_interval_minutes",
         "timeout_minutes",
+        "from",
+        "replyTo",
         "invocation.extensions.async_callback"
       ],
       "status_values": [
@@ -451,6 +453,25 @@
         "restart_supported": false,
         "cancel_supported": false,
         "execution_history_supported": false
+      },
+      "progress_diagnostics": {
+        "enabled": true,
+        "delivery": "ExternalEvent.status=progress",
+        "frequency": "before_each_polling_wait",
+        "fields": [
+          "case_id",
+          "wait_id",
+          "correlation_id",
+          "service_request",
+          "reply_mailbox_address",
+          "checked_resource",
+          "poll_iteration",
+          "last_poll_at",
+          "next_poll_at",
+          "mailbox_indexed_count",
+          "match_count",
+          "last_error"
+        ]
       }
     },
     {
@@ -472,7 +493,11 @@
       "cmdbuild": {
         "base_url_env": "CMDBUILD_BASE_URL",
         "class_name": "routerG",
-        "search_attribute": "Description",
+        "search_attributes": [
+          "Description",
+          "hostname",
+          "Code"
+        ],
         "required_router_attributes": [
           "email",
           "contract",

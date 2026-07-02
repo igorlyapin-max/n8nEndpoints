@@ -5,8 +5,6 @@
 Import and publish the composite workflow plus its dependencies:
 
 - `workflows/provider-channel-repair-monitor-webhook.json`
-- `workflows/cmdbuild-provider-email-context-webhook.json`
-- `workflows/send-templated-email-webhook.json`
 - `workflows/get-zabbix-problem-status-webhook.json`
 - `workflows/email-ticket-mailbox-collector.json`
 - `workflows/contracts-openapi-webhook.json`
@@ -26,13 +24,13 @@ n8n environment:
 - `CMDBUILD_BASE_URL`
 - `ZABBIX_API_TOKENS_BY_ORIGIN`
 - Optional `ZABBIX_API_URLS_BY_ORIGIN`
-- Optional `N8N_MAIL_FROM`
+- Required `from` и `replyTo` передаются в payload ранбука; SMTP/IMAP credentials остаются в n8n.
 - `INTEGRATION_CALLBACK_TOKEN` or `INTEGRATION_CALLBACK_TOKEN__<NORMALIZED_SOURCE>` when `http_callback` or `both` delivery is used
 
 n8n credentials:
 
 - HTTP Basic credential `Local CMDBuild Admin Test` or production equivalent on CMDBuild HTTP nodes.
-- SMTP credential on `sendTemplatedEmail` node `Отправка email`.
+- SMTP credential on provider monitor node `Отправка email провайдеру`.
 - IMAP credential on collector node `Получение входящего письма`.
 - Postgres credential `Local ServiceDesk Postgres` on `Поиск письма в индексе` and collector storage nodes.
 - Kafka credential `Local Redpanda Kafka` on node `Публикация ExternalEvent в Kafka` when `kafka_event` or `both` delivery is used.
@@ -66,10 +64,12 @@ node scripts/test-contracts.mjs
 2. Import or update dependency workflows listed above.
 3. Bind CMDBuild, SMTP, IMAP, Postgres and Kafka credentials.
 4. Import `workflows/provider-channel-repair-monitor-webhook.json`.
-5. Bind Postgres credential on node `Поиск письма в индексе`.
-6. Bind Kafka credential on node `Публикация ExternalEvent в Kafka` if Kafka delivery is enabled.
-7. Import/regenerate `workflows/contracts-openapi-webhook.json`.
-8. Activate all required workflows and restart n8n after publish if webhook registration changed.
+5. Bind CMDBuild credential on nodes `CMDBuild поиск routerG`, `CMDBuild чтение IpAddress`, `CMDBuild чтение Room`, `CMDBuild чтение Floor`, `CMDBuild чтение Building`.
+6. Bind SMTP credential on node `Отправка email провайдеру`.
+7. Bind Postgres credential on node `Поиск письма в индексе`.
+8. Bind Kafka credential on node `Публикация ExternalEvent в Kafka` if Kafka delivery is enabled.
+9. Import/regenerate `workflows/contracts-openapi-webhook.json`.
+10. Activate all required workflows and restart n8n after publish if webhook registration changed.
 
 Machine-readable contract:
 
@@ -96,7 +96,7 @@ Auth-negative:
 ```bash
 curl -i \
   -H 'Content-Type: application/json' \
-  -d '{"host":"Router for NTbook group 000 (OFF01 Office 01 - Headquarters)","problemUrl":"http://localhost:8081/tr_events.php?triggerid=61119&eventid=90528","service_request":"12345678","poll_interval_minutes":1,"timeout_minutes":1}' \
+  -d '{"problem_host":"ARM C2M-CITY-20260523-ARM-177-13","router_ref":"Router for NTbook group 000 (OFF01 Office 01 - Headquarters)","problemUrl":"http://localhost:8081/tr_events.php?triggerid=61119&eventid=90528","service_request":"12345678","poll_interval_minutes":1,"timeout_minutes":1,"from":"automation-test@local.test","replyTo":"automation-test@local.test"}' \
   http://127.0.0.1:5678/webhook/provider/channel-repair/monitor
 ```
 
@@ -108,7 +108,7 @@ Validation-negative:
 curl -i \
   -H 'Content-Type: application/json' \
   -H "X-ServiceDesk-Token: ${N8N_WEBHOOK_TOKEN}" \
-  -d '{"host":"Router for NTbook group 000 (OFF01 Office 01 - Headquarters)","problemUrl":"http://localhost:8081/tr_events.php?triggerid=61119&eventid=90528","service_request":"12345678","poll_interval_minutes":1,"timeout_minutes":1}' \
+  -d '{"problem_host":"ARM C2M-CITY-20260523-ARM-177-13","router_ref":"Router for NTbook group 000 (OFF01 Office 01 - Headquarters)","problemUrl":"http://localhost:8081/tr_events.php?triggerid=61119&eventid=90528","service_request":"12345678","poll_interval_minutes":1,"timeout_minutes":1,"from":"automation-test@local.test","replyTo":"automation-test@local.test"}' \
   http://127.0.0.1:5678/webhook/provider/channel-repair/monitor
 ```
 
@@ -120,7 +120,7 @@ Callback policy-negative:
 curl -i \
   -H 'Content-Type: application/json' \
   -H "X-ServiceDesk-Token: ${N8N_WEBHOOK_TOKEN}" \
-  -d '{"host":"Router for NTbook group 000 (OFF01 Office 01 - Headquarters)","problemUrl":"http://localhost:8081/tr_events.php?triggerid=61119&eventid=90528","service_request":"12345678","poll_interval_minutes":1,"timeout_minutes":1,"invocation":{"invocation_id":"cmd-provider-monitor-bad-callback","action_id":"monitor_provider_channel_repair","extensions":{"async_callback":{"source":"n8n","case_id":"case-000000000001","wait_id":"wait-000000000001","correlation_id":"case-000000000001:tool_command:cmd-provider-monitor-bad-callback","event_type":"monitor_provider_channel_repair_completed","callback_url":"http://user:pass@127.0.0.1:18088/external-events/n8n","idempotency_key_base":"case-000000000001:tool_command:cmd-provider-monitor-bad-callback","result_transport":"http_callback"}}}}' \
+  -d '{"problem_host":"ARM C2M-CITY-20260523-ARM-177-13","router_ref":"Router for NTbook group 000 (OFF01 Office 01 - Headquarters)","problemUrl":"http://localhost:8081/tr_events.php?triggerid=61119&eventid=90528","service_request":"12345678","poll_interval_minutes":1,"timeout_minutes":1,"from":"automation-test@local.test","replyTo":"automation-test@local.test","invocation":{"invocation_id":"cmd-provider-monitor-bad-callback","action_id":"monitor_provider_channel_repair","extensions":{"async_callback":{"source":"n8n","case_id":"case-000000000001","wait_id":"wait-000000000001","correlation_id":"case-000000000001:tool_command:cmd-provider-monitor-bad-callback","event_type":"monitor_provider_channel_repair_completed","callback_url":"http://user:pass@127.0.0.1:18088/external-events/n8n","idempotency_key_base":"case-000000000001:tool_command:cmd-provider-monitor-bad-callback","result_transport":"http_callback"}}}}' \
   http://127.0.0.1:5678/webhook/provider/channel-repair/monitor
 ```
 
@@ -132,7 +132,7 @@ Async accepted smoke:
 curl -fsS \
   -H 'Content-Type: application/json' \
   -H "X-ServiceDesk-Token: ${N8N_WEBHOOK_TOKEN}" \
-  -d '{"host":"Router for NTbook group 000 (OFF01 Office 01 - Headquarters)","problemUrl":"http://localhost:8081/tr_events.php?triggerid=61119&eventid=90528","service_request":"12345678","poll_interval_minutes":1,"timeout_minutes":1,"invocation":{"invocation_id":"cmd-provider-monitor-123","action_id":"monitor_provider_channel_repair","extensions":{"async_callback":{"source":"n8n","case_id":"case-000000000001","wait_id":"wait-000000000001","correlation_id":"case-000000000001:tool_command:cmd-provider-monitor-123","event_type":"monitor_provider_channel_repair_completed","idempotency_key_base":"case-000000000001:tool_command:cmd-provider-monitor-123","result_transport":"kafka_event","result_topic":"external.events"}}}}' \
+  -d '{"problem_host":"ARM C2M-CITY-20260523-ARM-177-13","router_ref":"Router for NTbook group 000 (OFF01 Office 01 - Headquarters)","problemUrl":"http://localhost:8081/tr_events.php?triggerid=61119&eventid=90528","service_request":"12345678","poll_interval_minutes":1,"timeout_minutes":1,"from":"automation-test@local.test","replyTo":"automation-test@local.test","invocation":{"invocation_id":"cmd-provider-monitor-123","action_id":"monitor_provider_channel_repair","extensions":{"async_callback":{"source":"n8n","case_id":"case-000000000001","wait_id":"wait-000000000001","correlation_id":"case-000000000001:tool_command:cmd-provider-monitor-123","event_type":"monitor_provider_channel_repair_completed","idempotency_key_base":"case-000000000001:tool_command:cmd-provider-monitor-123","result_transport":"kafka_event","result_topic":"external.events"}}}}' \
   http://127.0.0.1:5678/webhook/provider/channel-repair/monitor
 ```
 

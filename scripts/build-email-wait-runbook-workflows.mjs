@@ -3,6 +3,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import process from 'node:process';
 import { documentedWorkflow } from './workflow-inline-documentation.mjs';
+import { serviceDeskEnvironmentExpression } from './servicedesk-async-runbook-runtime.mjs';
 
 const COLLECTOR_WORKFLOW_PATH = 'workflows/email-ticket-mailbox-collector.json';
 const WAIT_WORKFLOW_PATH = 'workflows/wait-for-email-ticket-webhook.json';
@@ -21,6 +22,8 @@ const LOCAL_KAFKA_CREDENTIAL = {
   id: 'localRedpandaKafka',
   name: 'Local Redpanda Kafka',
 };
+
+const SERVICE_DESK_ENVIRONMENT_EXPR_SINGLE = serviceDeskEnvironmentExpression({ quote: "'" });
 
 function stableJson(value) {
   return JSON.stringify(value, null, 2);
@@ -80,6 +83,7 @@ const messageIdRaw = email.messageId || email.messageID || email['message-id'] |
 const fallbackId = ['fallback', receivedAt, fromEmail, subject].join(':').replace(/\s+/g, ' ').slice(0, 900);
 const messageId = String(messageIdRaw || fallbackId).trim();
 const mailbox = String(email.mailbox || 'INBOX').trim() || 'INBOX';
+const mailboxAddress = extractAddress(email.mailbox_address || email.mailboxAddress || email.deliveredTo || email.delivered_to || email.headers?.to || email.to || email.envelope?.to || '');
 
 const deliveryText = [subject, fromEmail, bodyText].join('\n').toLowerCase();
 const deliveryFailurePatterns = [
@@ -103,6 +107,7 @@ const createTableSql = [
   '  id bigserial PRIMARY KEY,',
   '  message_id text NOT NULL UNIQUE,',
   "  mailbox text NOT NULL DEFAULT 'INBOX',",
+  '  mailbox_address text,',
   '  from_email text,',
   '  subject text,',
   '  body_text text,',
@@ -112,7 +117,9 @@ const createTableSql = [
   '  is_delivery_failure boolean NOT NULL DEFAULT false,',
   '  delivery_failure_reason text',
   ');',
+  'ALTER TABLE n8n_mail_index ADD COLUMN IF NOT EXISTS mailbox_address text;',
   'CREATE INDEX IF NOT EXISTS idx_n8n_mail_index_received_at ON n8n_mail_index (received_at);',
+  "CREATE INDEX IF NOT EXISTS idx_n8n_mail_index_mailbox_address ON n8n_mail_index (lower(coalesce(mailbox_address, '')));",
   'CREATE INDEX IF NOT EXISTS idx_n8n_mail_index_delivery_failure ON n8n_mail_index (is_delivery_failure, received_at);'
 ].join('\n');
 
@@ -121,6 +128,7 @@ const sql = [
   'INSERT INTO n8n_mail_index (',
   '  message_id,',
   '  mailbox,',
+  '  mailbox_address,',
   '  from_email,',
   '  subject,',
   '  body_text,',
@@ -132,6 +140,7 @@ const sql = [
   ') VALUES (',
   '  ' + sqlString(messageId) + ',',
   '  ' + sqlString(mailbox) + ',',
+  '  ' + sqlString(mailboxAddress) + ',',
   '  ' + sqlString(fromEmail) + ',',
   '  ' + sqlString(subject) + ',',
   '  ' + sqlString(bodyText) + ',',
@@ -143,6 +152,7 @@ const sql = [
   ')',
   'ON CONFLICT (message_id) DO UPDATE SET',
   '  mailbox = EXCLUDED.mailbox,',
+  '  mailbox_address = EXCLUDED.mailbox_address,',
   '  from_email = EXCLUDED.from_email,',
   '  subject = EXCLUDED.subject,',
   '  body_text = EXCLUDED.body_text,',
@@ -155,7 +165,7 @@ const sql = [
   'SELECT ' + sqlString(messageId) + ' AS message_id, ' + sqlString(receivedAt) + '::timestamptz AS received_at, ' + (isDeliveryFailure ? 'true' : 'false') + ' AS is_delivery_failure;'
 ].join('\n');
 
-return [{ json: { sql, message_id: messageId, subject, from_email: fromEmail, received_at: receivedAt, is_delivery_failure: isDeliveryFailure } }];`;
+return [{ json: { sql, message_id: messageId, subject, from_email: fromEmail, mailbox_address: mailboxAddress, received_at: receivedAt, is_delivery_failure: isDeliveryFailure } }];`;
 
 const prepareWaitRequestCode = String.raw`const input = $input.first().json || {};
 const headers = input.headers || {};
@@ -229,7 +239,7 @@ const validateCallbackUrl = (value) => {
   if (!parsed) return { reason: 'invalid_url' };
   if (!['http:', 'https:'].includes(parsed.protocol)) return { reason: 'invalid_scheme' };
   if (parsed.hasCredentials) return { reason: 'credentials_not_allowed' };
-  const envName = stringValue(envValue('NODE_ENV') || envValue('N8N_ENVIRONMENT') || envValue('ENVIRONMENT')).toLowerCase();
+  const envName = stringValue(${SERVICE_DESK_ENVIRONMENT_EXPR_SINGLE}).toLowerCase();
   const localEnv = !envName || envName === 'development' || envName === 'dev' || envName === 'local' || envName === 'test';
   const production = envName === 'production' || envName === 'prod';
   const hostname = parsed.hostname.toLowerCase();
@@ -362,6 +372,7 @@ const createTableSql = [
   '  id bigserial PRIMARY KEY,',
   '  message_id text NOT NULL UNIQUE,',
   "  mailbox text NOT NULL DEFAULT 'INBOX',",
+  '  mailbox_address text,',
   '  from_email text,',
   '  subject text,',
   '  body_text text,',
@@ -371,7 +382,9 @@ const createTableSql = [
   '  is_delivery_failure boolean NOT NULL DEFAULT false,',
   '  delivery_failure_reason text',
   ');',
+  'ALTER TABLE n8n_mail_index ADD COLUMN IF NOT EXISTS mailbox_address text;',
   'CREATE INDEX IF NOT EXISTS idx_n8n_mail_index_received_at ON n8n_mail_index (received_at);',
+  "CREATE INDEX IF NOT EXISTS idx_n8n_mail_index_mailbox_address ON n8n_mail_index (lower(coalesce(mailbox_address, '')));",
   'CREATE INDEX IF NOT EXISTS idx_n8n_mail_index_delivery_failure ON n8n_mail_index (is_delivery_failure, received_at);'
 ].join('\n');
 
@@ -383,6 +396,7 @@ const sql = [
   '    id,',
   '    message_id,',
   '    mailbox,',
+  '    mailbox_address,',
   '    from_email,',
   '    subject,',
   '    body_text,',
@@ -707,7 +721,7 @@ function collectorWorkflow() {
         main: [[{ node: 'Запись письма в индекс', type: 'main', index: 0 }]],
       },
     },
-    active: false,
+    active: true,
     settings: {
       executionOrder: 'v1',
       saveDataErrorExecution: 'none',
@@ -847,12 +861,12 @@ function waitWorkflow() {
       },
       'Async режим?': {
         main: [
-          [{ node: 'Ответ accepted', type: 'main', index: 0 }],
+          [
+            { node: 'Ответ accepted', type: 'main', index: 0 },
+            { node: 'Подготовка SQL поиска', type: 'main', index: 0 },
+          ],
           [{ node: 'Подготовка SQL поиска', type: 'main', index: 0 }],
         ],
-      },
-      'Ответ accepted': {
-        main: [[{ node: 'Подготовка SQL поиска', type: 'main', index: 0 }]],
       },
       'Подготовка SQL поиска': {
         main: [[{ node: 'Поиск письма в индексе', type: 'main', index: 0 }]],

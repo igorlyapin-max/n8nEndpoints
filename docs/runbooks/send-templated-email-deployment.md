@@ -6,7 +6,7 @@
 - В окружении контейнера n8n задан `N8N_WEBHOOK_TOKEN`.
 - В окружении контейнера n8n задан `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`, если установленная версия n8n блокирует чтение env в Code nodes.
 - Опционально задан `N8N_WORKFLOW_DEBUG=Basic` для безопасных structured diagnostics; `Verbose` используйте только временно.
-- Опционально задан `N8N_MAIL_FROM`, иначе workflow использует `noreply@local.dev`.
+- Задан `from` и `replyTo` передаются в payload ранбука; SMTP/IMAP credentials остаются в n8n.
 - Для node `Отправка email` создан SMTP credential.
 - Workflow `Contracts: OpenAPI discovery` импортирован и активирован.
 - Workflow `Contracts: Email template catalog` импортирован и активирован.
@@ -99,7 +99,7 @@ curl -fsS \
   -H "X-ServiceDesk-Token: ${N8N_WEBHOOK_TOKEN}" \
   -d '{
     "to": ["automation-test@local.test"],
-    "replyTo": "sender@local.test",
+    "replyTo": "automation-test@local.test",
     "templateId": "provider_line_repair_request",
     "params": {
       "localTicketNumber": "ГКМ12345678",

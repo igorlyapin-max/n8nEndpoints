@@ -68,7 +68,7 @@
 - MS AD LDAPS endpoint, Base DN и LDAP credential `MS AD LDAPS` для read-only поиска login по ФИО и табельному номеру.
 - Для смены пароля в MS AD: прямой reset workflow internal-only, нужен `N8N_INTERNAL_RUNBOOK_TOKEN`, право service account на reset password и force change on first login, а также disposable test account для smoke. Пароль из response считается секретом и не должен попадать в логи, tickets, screenshots, callback payloads или Kafka events.
 - Для end-to-end обработки заявки на смену пароля: активные dependency workflows HR applicant participant, HR manager verification, AD login lookup, AD password reset и templated email; `N8N_INTERNAL_WEBHOOK_BASE_URL` должен указывать на внутренний webhook base URL n8n; caller обязан передать `approval_id`, `approved_by`, `idempotency_key`.
-- Опциональный `N8N_MAIL_FROM`. Если он не задан, email workflows используют fallback `noreply@local.dev`.
+- Обязательный `from` и `replyTo` передаются в payload ранбука; SMTP/IMAP credentials остаются в n8n.
 - Тестовый recipient mailbox, куда можно отправить smoke email без риска для production пользователей.
 - Для Zabbix workflow: список Zabbix UI origins, API URLs из сети n8n, API tokens, права на `problem.get` и добавление сообщения через `event.acknowledge`.
 - Для multi-Zabbix: JSON registry `ZABBIX_API_TOKENS_BY_ORIGIN` и, если UI origin не равен API URL из контейнера n8n, `ZABBIX_API_URLS_BY_ORIGIN`.
@@ -88,7 +88,7 @@
 | --- | --- | --- | --- |
 | `workflows/contracts-openapi-webhook.json` | `Contracts: OpenAPI discovery` | `GET /webhook/contracts/openapi.json` | Credentials не нужны. Token не нужен. Язык по умолчанию `ru`; опционально `N8N_OPENAPI_DEFAULT_LOCALE=ru|en` и env access для Code node, например `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`, если этого требует версия n8n. |
 | `workflows/email-template-catalog-webhook.json` | `Contracts: Email template catalog` | `GET /webhook/contracts/email-templates.json` | Credentials не нужны. Token не нужен. |
-| `workflows/send-email-webhook.json` | `Email: отправка письма через webhook` | `POST /webhook/email/send` | `N8N_WEBHOOK_TOKEN`; SMTP credential на node `Отправка email`; опционально `N8N_MAIL_FROM`. |
+| `workflows/send-email-webhook.json` | `Email: отправка письма через webhook` | `POST /webhook/email/send` | `N8N_WEBHOOK_TOKEN`; SMTP credential на node `Отправка email`; `from` и `replyTo` передаются в payload ранбука; SMTP/IMAP credentials остаются в n8n.
 | `workflows/send-templated-email-webhook.json` | `Email: отправка письма по шаблону` | `POST /webhook/email/send-template` | `N8N_WEBHOOK_TOKEN`; SMTP credential на node `Отправка email`; `contracts/email-template-catalog.json` как source of truth. |
 | `workflows/email-ticket-mailbox-collector.json` | `Email: индекс входящих писем` | IMAP trigger, без external webhook | IMAP credential на node `Получение входящего письма`; Postgres credential на node `Запись письма в индекс`. |
 | `workflows/wait-for-email-ticket-webhook.json` | `Email: ожидание письма по номеру заявки` | `POST /webhook/email/wait-for-ticket` | `N8N_WEBHOOK_TOKEN`; Postgres credential на node `Поиск письма в индексе`; callback token env/Kafka credential для async delivery. |
@@ -98,7 +98,7 @@
 | `workflows/ad-user-login-lookup-webhook.json` | `AD: поиск login и email пользователя` | `POST /webhook/ad/user/login-lookup` | `N8N_WEBHOOK_TOKEN`; `AD_BASE_DN`; LDAP credential `MS AD LDAPS` на node `LDAP поиск пользователя`; optional `AD_FULL_NAME_ATTRIBUTE`, `AD_EMPLOYEE_ID_ATTRIBUTE`, `AD_LOGIN_ATTRIBUTE`, `AD_EMAIL_ATTRIBUTE`. |
 | `workflows/ad-password-reset-webhook.json` | `AD: смена пароля пользователя` | `POST /webhook/ad/user/reset-password` | Internal-only; `N8N_WEBHOOK_TOKEN`; `N8N_INTERNAL_RUNBOOK_TOKEN`; `AD_PASSWORD_RESET_BASE_DN` или `AD_BASE_DN`; LDAP credential `MS AD LDAPS` на nodes `LDAP поиск пользователя` и `LDAP смена пароля`; optional `AD_PASSWORD_RESET_LOGIN_ATTRIBUTE`/`AD_LOGIN_ATTRIBUTE`, `AD_PASSWORD_ALLOWED_CHARS`; service account rights reset password + force change on first login. |
 | `workflows/ad-password-reset-process-webhook.json` | `AD: обработка заявки на смену пароля` | `POST /webhook/ad/password-reset/process` | `N8N_WEBHOOK_TOKEN`; `N8N_INTERNAL_RUNBOOK_TOKEN`; `N8N_INTERNAL_WEBHOOK_BASE_URL` или `N8N_WEBHOOK_BASE_URL`; активные dependency workflows HR/AD/email; execution data saving disabled; external approval policy required with `approval_id`, `approved_by`, `idempotency_key`. |
-| `workflows/provider-channel-repair-monitor-webhook.json` | `Provider: письмо и мониторинг ремонта канала` | `POST /webhook/provider/channel-repair/monitor` | `N8N_WEBHOOK_TOKEN`; `N8N_INTERNAL_WEBHOOK_BASE_URL` или `N8N_WEBHOOK_BASE_URL`; Postgres credential на node `Поиск письма в индексе`; Kafka credential на node `Публикация ExternalEvent в Kafka`; активные CMDBuild/email-template/Zabbix/email collector dependencies. |
+| `workflows/provider-channel-repair-monitor-webhook.json` | `Provider: письмо и мониторинг ремонта канала` | `POST /webhook/provider/channel-repair/monitor` | `N8N_WEBHOOK_TOKEN`; `N8N_INTERNAL_WEBHOOK_BASE_URL` или `N8N_WEBHOOK_BASE_URL`; `CMDBUILD_BASE_URL`; HTTP Basic credential на CMDBuild nodes; SMTP credential на node `Отправка email провайдеру`; Postgres credential на node `Поиск письма в индексе`; Kafka credential на node `Публикация ExternalEvent в Kafka`; активные Zabbix status/email collector dependencies. |
 | `workflows/update-zabbix-problem-webhook.json` | `Zabbix: обновление problem по URL` | `POST /webhook/zabbix/problem/update` | `N8N_WEBHOOK_TOKEN`; `ZABBIX_API_TOKENS_BY_ORIGIN`; опционально `ZABBIX_API_URLS_BY_ORIGIN`; `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`. |
 | `workflows/get-zabbix-problem-status-webhook.json` | `Zabbix: статус problem по URL` | `POST /webhook/zabbix/problem/status` | `N8N_WEBHOOK_TOKEN`; `ZABBIX_API_TOKENS_BY_ORIGIN`; опционально `ZABBIX_API_URLS_BY_ORIGIN`; `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`. |
 | `workflows/wait-zabbix-problem-status-webhook.json` | `Zabbix: ожидание статуса problem` | `POST /webhook/zabbix/problem/wait` | `N8N_WEBHOOK_TOKEN`; `N8N_INTERNAL_WEBHOOK_BASE_URL` или `N8N_WEBHOOK_BASE_URL`; активный `Zabbix: статус problem по URL`; callback token env/Kafka credential для async delivery. |
@@ -119,7 +119,6 @@ curl -fsS https://n8n.example.ru/healthz
 N8N_WEBHOOK_TOKEN=<generated-secret>
 N8N_BLOCK_ENV_ACCESS_IN_NODE=false
 N8N_WORKFLOW_DEBUG=off
-N8N_MAIL_FROM=<approved-from-address>
 N8N_WEBHOOK_BASE_URL=https://n8n.example.ru/webhook
 N8N_INTERNAL_WEBHOOK_BASE_URL=https://n8n.example.ru/webhook
 N8N_INTERNAL_RUNBOOK_TOKEN=<long-random-internal-token>
@@ -181,7 +180,7 @@ ZABBIX_API_URLS_BY_ORIGIN={"https://zabbix.example.ru":"https://zabbix-api.examp
 
 13. Для AD password reset process проверьте, что dependency workflows HR applicant participant, HR manager verification, AD login lookup, AD password reset и templated email активны, а `N8N_INTERNAL_WEBHOOK_BASE_URL` и `N8N_INTERNAL_RUNBOOK_TOKEN` доступны из n8n runtime.
 
-14. Для составного provider monitor workflow привяжите Postgres credential к node `Поиск письма в индексе` и Kafka credential к node `Публикация ExternalEvent в Kafka`, если используется `kafka_event` или `both`. Проверьте, что dependency workflows CMDBuild/email-template/Zabbix status/email collector активны.
+14. Для составного provider monitor workflow привяжите CMDBuild credential к nodes `CMDBuild поиск routerG`, `CMDBuild чтение IpAddress`, `CMDBuild чтение Room`, `CMDBuild чтение Floor`, `CMDBuild чтение Building`; SMTP credential к node `Отправка email провайдеру`; Postgres credential к node `Поиск письма в индексе` и Kafka credential к node `Публикация ExternalEvent в Kafka`, если используется `kafka_event` или `both`. Проверьте, что dependency workflows Zabbix status/email collector активны.
 
 15. Для Zabbix wait workflow привяжите Kafka credential к node `Публикация ExternalEvent в Kafka`, если используется `kafka_event` или `both`. Проверьте, что workflow `Zabbix: статус problem по URL` активен.
 

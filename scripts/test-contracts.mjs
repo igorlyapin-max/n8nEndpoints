@@ -24,6 +24,21 @@ function workflowNode(workflowPath, nodeId) {
   return node;
 }
 
+function assertMainConnectionIncludes(workflowPath, fromNode, outputIndex, toNode) {
+  const workflow = readJson(workflowPath);
+  const output = workflow.connections?.[fromNode]?.main?.[outputIndex] || [];
+  assert.ok(
+    output.some((connection) => connection.node === toNode),
+    `${workflowPath}: expected ${fromNode} output ${outputIndex} to include ${toNode}`,
+  );
+}
+
+function assertNoMainConnectionFrom(workflowPath, fromNode) {
+  const workflow = readJson(workflowPath);
+  const mainConnections = workflow.connections?.[fromNode]?.main || [];
+  assert.equal(mainConnections.flat().length, 0, `${workflowPath}: ${fromNode} must not have downstream work`);
+}
+
 function assertRequiredAlternatives(schema, expectedGroups) {
   const groups = (schema.allOf || []).map((entry) =>
     (entry.anyOf || []).map((alternative) => alternative.required || []),
@@ -65,6 +80,14 @@ function internalRequest(body, token = 'test-token', internalToken = 'internal-t
   if (internalToken) value.headers['x-servicedesk-internal-token'] = internalToken;
   return value;
 }
+
+const LOCAL_CALLBACK_URL = 'http://hostmachine:18088/external-events/n8n';
+const LOCAL_CALLBACK_ENV_WITH_NODE_PRODUCTION = {
+  NODE_ENV: 'production',
+  N8N_ENVIRONMENT: 'local',
+  SERVICE_DESK_ENV: 'local',
+  ORCHESTRATOR_PUBLIC_URL: 'http://hostmachine:18088',
+};
 
 function responseOf(items) {
   assert.ok(Array.isArray(items), 'Code node must return item array');
@@ -292,6 +315,24 @@ async function testStage4() {
   assert.equal(invalidCallback.statusCode, 400);
   assert.equal(invalidCallback.response.error.code, 'invalid_callback_url');
 
+  const localCallbackWithNodeProduction = responseOf(
+    await run(
+      request({
+        invocation: stage4Async('both', {
+          callback_url: LOCAL_CALLBACK_URL,
+          result_topic: 'external.events',
+        }),
+        parameters: { source: 'smoke' },
+      }),
+      {
+        N8N_WEBHOOK_TOKEN: 'test-token',
+        ...LOCAL_CALLBACK_ENV_WITH_NODE_PRODUCTION,
+      },
+    ),
+  );
+  assert.equal(localCallbackWithNodeProduction.statusCode, 200);
+  assert.notEqual(localCallbackWithNodeProduction.response.error?.code, 'invalid_callback_url');
+
   const kafkaNode = workflowNode('workflows/stage4-runbook-webhook.json', 'stage4-runbook-kafka-publish');
   assert.equal(kafkaNode.type, 'n8n-nodes-base.kafka');
   assert.equal(kafkaNode.parameters.topic, '={{ $json.kafkaTopic }}');
@@ -335,6 +376,9 @@ async function testWaitForEmailByTicket() {
   assert.equal(asyncAccepted.async_delivery, true);
   assert.equal(asyncAccepted.response.runbook_status, 'accepted');
   assert.equal(asyncAccepted.response.result_topic, 'external.events');
+  assertMainConnectionIncludes('workflows/wait-for-email-ticket-webhook.json', 'Async режим?', 0, 'Ответ accepted');
+  assertMainConnectionIncludes('workflows/wait-for-email-ticket-webhook.json', 'Async режим?', 0, 'Подготовка SQL поиска');
+  assertNoMainConnectionFrom('workflows/wait-for-email-ticket-webhook.json', 'Ответ accepted');
 
   const missingTopic = responseOf(
     await runPrepare(
@@ -365,6 +409,22 @@ async function testWaitForEmailByTicket() {
   );
   assert.equal(invalidCallback.statusCode, 400);
   assert.equal(invalidCallback.response.error.code, 'invalid_callback_url');
+
+  const localCallbackWithNodeProduction = responseOf(
+    await runPrepare(
+      request({
+        ticket_number: 'ГКМ123456',
+        poll_interval_minutes: 15,
+        timeout_minutes: 60,
+        invocation: emailWaitAsync('http_callback', {
+          callback_url: LOCAL_CALLBACK_URL,
+        }),
+      }),
+      { ...env, ...LOCAL_CALLBACK_ENV_WITH_NODE_PRODUCTION },
+    ),
+  );
+  assert.equal(localCallbackWithNodeProduction.statusCode, 200);
+  assert.equal(localCallbackWithNodeProduction.response.runbook_status, 'accepted');
 
   const collector = responseOf(
     await runner(collectorCode)({
@@ -401,6 +461,7 @@ async function testWaitForEmailByTicket() {
   const firstMatch = {
     message_id: '<provider-1@example.test>',
     mailbox: 'INBOX',
+    mailbox_address: 'automation-test@local.test',
     from_email: 'provider@example.test',
     subject: 'Re: заявка ГКМ123456',
     body_text: 'Ваше обращение зарегистрировано.',
@@ -414,6 +475,7 @@ async function testWaitForEmailByTicket() {
     await runner(evaluateCode)({
       ...baseRow,
       match_count: 1,
+      mailbox_indexed_count: 1,
       delivery_failure_count: 0,
       first_match_json: JSON.stringify(firstMatch),
     }),
@@ -426,6 +488,7 @@ async function testWaitForEmailByTicket() {
     await runner(evaluateCode)({
       ...baseRow,
       match_count: 2,
+      mailbox_indexed_count: 1,
       delivery_failure_count: 0,
       first_match_json: JSON.stringify(firstMatch),
     }),
@@ -454,6 +517,7 @@ async function testWaitForEmailByTicket() {
       ...baseRow,
       deadline_at: past,
       match_count: 0,
+      mailbox_indexed_count: 1,
       delivery_failure_count: 0,
     }),
   );
@@ -463,6 +527,7 @@ async function testWaitForEmailByTicket() {
     await runner(evaluateCode)({
       ...baseRow,
       match_count: 0,
+      mailbox_indexed_count: 1,
       delivery_failure_count: 0,
     }),
   );
@@ -529,10 +594,12 @@ async function testTemplatedEmail() {
   const validateCode = codeNode('workflows/send-templated-email-webhook.json', 'send-templated-email-validate-request');
   const run = runner(validateCode);
   const env = { N8N_WEBHOOK_TOKEN: 'test-token' };
+  const emailEnvelope = { from: 'automation-test@local.test', replyTo: 'automation-test@local.test' };
+  const bodyWithEnvelope = (payload) => request({ ...emailEnvelope, ...payload });
 
   const invalidPattern = responseOf(
     await run(
-      request({
+      bodyWithEnvelope({
         to: ['automation-test@local.test'],
         templateId: 'provider_line_repair_request',
         params: {
@@ -553,7 +620,7 @@ async function testTemplatedEmail() {
 
   const crlfParam = responseOf(
     await run(
-      request({
+      bodyWithEnvelope({
         to: ['automation-test@local.test'],
         templateId: 'provider_channel_outage_test',
         params: {
@@ -573,7 +640,7 @@ async function testTemplatedEmail() {
 
   const ok = responseOf(
     await run(
-      request({
+      bodyWithEnvelope({
         to: 'automation-test@local.test',
         cc: 'cc@local.test; second-cc@local.test',
         bcc: ['audit@local.test'],
@@ -594,10 +661,12 @@ async function testTemplatedEmail() {
   assert.equal(ok.subject, 'Пропадание связи по каналу Москва');
   assert.equal(ok.ccEmail, 'cc@local.test, second-cc@local.test');
   assert.equal(ok.bccEmail, 'audit@local.test');
+  assert.equal(ok.from_email, 'automation-test@local.test');
+  assert.equal(ok.reply_to, 'automation-test@local.test');
 
   const passwordNotice = responseOf(
     await run(
-      request({
+      bodyWithEnvelope({
         to: 'manager@local.test',
         templateId: 'ad_password_reset_notification',
         params: {
@@ -629,6 +698,9 @@ async function testTemplatedEmail() {
   assert.equal(workflow.settings.saveDataErrorExecution, 'none');
   assert.equal(workflow.settings.saveDataSuccessExecution, 'none');
   assert.equal(workflow.settings.saveManualExecutions, false);
+  const sendNode = workflowNode('workflows/send-templated-email-webhook.json', 'send-templated-email-node');
+  assert.equal(sendNode.parameters.fromEmail, '={{ $json.from_email }}');
+  assert.equal(sendNode.parameters.options.replyTo, '={{ $json.reply_to }}');
 }
 
 async function testZabbixProblem() {
@@ -888,6 +960,14 @@ async function testWaitZabbixProblemStatus() {
   assert.equal(accepted.response.result_topic, 'external.events');
   assert.equal(accepted.internal_webhook_base_url, 'http://127.0.0.1:5678/webhook');
   assert.equal(Object.hasOwn(accepted, 'webhook_token'), false);
+  assertMainConnectionIncludes('workflows/wait-zabbix-problem-status-webhook.json', 'Запрос валиден?', 0, 'Ответ accepted');
+  assertMainConnectionIncludes(
+    'workflows/wait-zabbix-problem-status-webhook.json',
+    'Запрос валиден?',
+    0,
+    'Проверка статуса Zabbix',
+  );
+  assertNoMainConnectionFrom('workflows/wait-zabbix-problem-status-webhook.json', 'Ответ accepted');
 
   const aliasAccepted = responseOf(
     await runner(prepareCode)(
@@ -919,6 +999,22 @@ async function testWaitZabbixProblemStatus() {
   );
   assert.equal(invalidCallback.statusCode, 400);
   assert.equal(invalidCallback.response.error.code, 'invalid_callback_url');
+
+  const localCallbackWithNodeProduction = responseOf(
+    await runner(prepareCode)(
+      request({
+        problemUrl: body.problemUrl,
+        poll_interval_minutes: 15,
+        timeout_minutes: 60,
+        invocation: zabbixWaitAsync('http_callback', {
+          callback_url: LOCAL_CALLBACK_URL,
+        }),
+      }),
+      { ...env, ...LOCAL_CALLBACK_ENV_WITH_NODE_PRODUCTION },
+    ),
+  );
+  assert.equal(localCallbackWithNodeProduction.statusCode, 200);
+  assert.equal(localCallbackWithNodeProduction.response.runbook_status, 'accepted');
 
   const runWithZabbixStatus = (zabbixStatus) =>
     async (json) => runner(checkCode, {
@@ -2198,7 +2294,11 @@ async function testCmdbuildProviderContext() {
   assert.equal(prepared.valid, true);
   assert.equal(prepared.cmdbuild_base_url, 'http://cmdbuild.local/cmdbuild');
   assert.ok(prepared.router_search_url.includes('/services/rest/v3/classes/routerG/cards'));
-  assert.ok(decodeURIComponent(prepared.router_search_url).includes('"Description"'));
+  const decodedRouterSearch = decodeURIComponent(prepared.router_search_url);
+  assert.ok(decodedRouterSearch.includes('"or"'));
+  assert.ok(decodedRouterSearch.includes('"Description"'));
+  assert.ok(decodedRouterSearch.includes('"hostname"'));
+  assert.ok(decodedRouterSearch.includes('"Code"'));
 
   const runParse = runner(parseRouterCode, {
     $: nodeLookup({ 'Подготовка запроса CMDBuild': prepared }),
@@ -2221,6 +2321,7 @@ async function testCmdbuildProviderContext() {
   );
   assert.equal(notFound.statusCode, 404);
   assert.equal(notFound.response.error.code, 'router_not_found');
+  assert.equal(notFound.response.error.message, 'routerG не найден по Description, hostname или Code.');
 
   const duplicate = responseOf(
     await runParse({
@@ -2344,9 +2445,25 @@ async function testProviderChannelRepairMonitor() {
     'workflows/provider-channel-repair-monitor-webhook.json',
     'provider-channel-monitor-prepare',
   );
-  const initialCode = codeNode(
+  const cmdbuildPrepareCode = codeNode(
     'workflows/provider-channel-repair-monitor-webhook.json',
-    'provider-channel-monitor-initial-actions',
+    'provider-channel-monitor-cmdbuild-prepare',
+  );
+  const cmdbuildParseCode = codeNode(
+    'workflows/provider-channel-repair-monitor-webhook.json',
+    'provider-channel-monitor-cmdbuild-parse-router',
+  );
+  const cmdbuildNormalizeCode = codeNode(
+    'workflows/provider-channel-repair-monitor-webhook.json',
+    'provider-channel-monitor-cmdbuild-normalize',
+  );
+  const emailPrepareCode = codeNode(
+    'workflows/provider-channel-repair-monitor-webhook.json',
+    'provider-channel-monitor-email-prepare',
+  );
+  const emailResultCode = codeNode(
+    'workflows/provider-channel-repair-monitor-webhook.json',
+    'provider-channel-monitor-email-result',
   );
   const zabbixCode = codeNode(
     'workflows/provider-channel-repair-monitor-webhook.json',
@@ -2369,11 +2486,14 @@ async function testProviderChannelRepairMonitor() {
     N8N_INTERNAL_WEBHOOK_BASE_URL: 'http://127.0.0.1:5678/webhook',
   };
   const body = {
-    host: 'Router for NTbook group 000 (OFF01 Office 01 - Headquarters)',
+    problem_host: 'ARM C2M-CITY-20260523-ARM-177-13',
+    router_ref: 'Router for NTbook group 000 (OFF01 Office 01 - Headquarters)',
     problemUrl: 'http://localhost:8081/tr_events.php?triggerid=61119&eventid=90528',
     service_request: '12345678',
     poll_interval_minutes: 15,
     timeout_minutes: 60,
+    from: 'automation-test@local.test',
+    replyTo: 'automation-test@local.test',
     invocation: providerMonitorAsync('kafka_event', { result_topic: 'external.events' }),
   };
 
@@ -2384,11 +2504,14 @@ async function testProviderChannelRepairMonitor() {
   const missingAsync = responseOf(
     await runner(prepareCode)(
       request({
-        host: body.host,
+        problem_host: body.problem_host,
+        router_ref: body.router_ref,
         problemUrl: body.problemUrl,
         service_request: body.service_request,
         poll_interval_minutes: 15,
         timeout_minutes: 60,
+        from: body.from,
+        replyTo: body.replyTo,
       }),
       env,
     ),
@@ -2403,33 +2526,72 @@ async function testProviderChannelRepairMonitor() {
   assert.equal(accepted.response.async_delivery, true);
   assert.equal(accepted.response.result_topic, 'external.events');
   assert.equal(accepted.internal_webhook_base_url, 'http://127.0.0.1:5678/webhook');
+  assert.equal(accepted.from_email, 'automation-test@local.test');
+  assert.equal(accepted.reply_to, 'automation-test@local.test');
+  assert.equal(accepted.reply_mailbox_address, 'automation-test@local.test');
   assert.equal(Object.hasOwn(accepted, 'webhook_token'), false);
+  const workerTrigger = workflowNode(
+    'workflows/provider-channel-repair-monitor-webhook.json',
+    'provider-channel-monitor-worker-trigger',
+  );
+  assert.equal(workerTrigger.type, 'n8n-nodes-base.executeWorkflowTrigger');
+  assert.equal(workerTrigger.parameters.inputSource, 'passthrough');
+  const workerDispatch = workflowNode(
+    'workflows/provider-channel-repair-monitor-webhook.json',
+    'provider-channel-monitor-dispatch-worker',
+  );
+  assert.equal(workerDispatch.type, 'n8n-nodes-base.executeWorkflow');
+  assert.equal(workerDispatch.parameters.workflowId.value, 'providerChannelRepairMonitor');
+  assert.deepEqual(workerDispatch.parameters.workflowInputs.value, {});
+  assert.equal(workerDispatch.parameters.options.waitForSubWorkflow, false);
+  assertMainConnectionIncludes('workflows/provider-channel-repair-monitor-webhook.json', 'Запрос валиден?', 0, 'Запуск worker мониторинга');
+  assertMainConnectionIncludes('workflows/provider-channel-repair-monitor-webhook.json', 'Запуск worker мониторинга', 0, 'Ответ accepted');
+  assertMainConnectionIncludes(
+    'workflows/provider-channel-repair-monitor-webhook.json',
+    'Worker мониторинга ремонта канала',
+    0,
+    'Подготовка state worker',
+  );
+  assertMainConnectionIncludes(
+    'workflows/provider-channel-repair-monitor-webhook.json',
+    'Подготовка state worker',
+    0,
+    'Подготовка CMDBuild контекста',
+  );
+  assertNoMainConnectionFrom('workflows/provider-channel-repair-monitor-webhook.json', 'Ответ accepted');
 
   const aliasAccepted = responseOf(
     await runner(prepareCode)(
       request({
-        hostname: body.host,
+        problemHost: body.problem_host,
+        routerRef: body.router_ref,
         problem_url: body.problemUrl,
         serviceRequest: body.service_request,
         pollIntervalMinutes: 15,
         timeoutMinutes: 60,
+        from: body.from,
+        reply_to: body.replyTo,
         invocation: providerMonitorAsync('kafka_event', { result_topic: 'external.events' }),
       }),
       env,
     ),
   );
   assert.equal(aliasAccepted.statusCode, 200);
-  assert.equal(aliasAccepted.host, body.host);
+  assert.equal(aliasAccepted.host, body.problem_host);
+  assert.equal(aliasAccepted.router_ref, body.router_ref);
   assert.equal(aliasAccepted.service_request, body.service_request);
 
   const invalidCallback = responseOf(
     await runner(prepareCode)(
       request({
-        host: body.host,
+        problem_host: body.problem_host,
+        router_ref: body.router_ref,
         problemUrl: body.problemUrl,
         service_request: body.service_request,
         poll_interval_minutes: 15,
         timeout_minutes: 60,
+        from: body.from,
+        replyTo: body.replyTo,
         invocation: providerMonitorAsync('http_callback', {
           callback_url: 'http://evil.example/external-events/n8n',
         }),
@@ -2440,53 +2602,168 @@ async function testProviderChannelRepairMonitor() {
   assert.equal(invalidCallback.statusCode, 400);
   assert.equal(invalidCallback.response.error.code, 'invalid_callback_url');
 
-  const initialCalls = [];
-  const providerContext = {
-    status: 'OK',
-    hostname: body.host,
-    router_id: 1308541,
-    city: 'Москва',
-    location: 'Москва, ул. Тестовая, д. 1',
-    ip_address: '192.0.2.10',
-    contract: 'CNT-100500',
-    provider_email: 'provider@example.test',
-  };
-  const initialOk = responseOf(
-    await runner(initialCode, {
-      helpers: {
-        async httpRequest(options) {
-          initialCalls.push(options);
-          if (options.url.endsWith('/cmdbuild/provider-email-context')) return providerContext;
-          if (options.url.endsWith('/email/send-template')) return { status: 'sent' };
-          throw new Error(`unexpected internal URL ${options.url}`);
-        },
+  const localCallbackWithNodeProduction = responseOf(
+    await runner(prepareCode)(
+      request({
+        problem_host: body.problem_host,
+        router_ref: body.router_ref,
+        problemUrl: body.problemUrl,
+        service_request: body.service_request,
+        poll_interval_minutes: 15,
+        timeout_minutes: 60,
+        from: body.from,
+        replyTo: body.replyTo,
+        invocation: providerMonitorAsync('http_callback', {
+          callback_url: LOCAL_CALLBACK_URL,
+        }),
+      }),
+      { ...env, ...LOCAL_CALLBACK_ENV_WITH_NODE_PRODUCTION },
+    ),
+  );
+  assert.equal(localCallbackWithNodeProduction.statusCode, 200);
+  assert.equal(localCallbackWithNodeProduction.response.runbook_status, 'accepted');
+
+  const cmdbuildPrepared = responseOf(
+    await runner(cmdbuildPrepareCode)(accepted, { CMDBUILD_BASE_URL: 'http://cmdbuild.local/cmdbuild' }),
+  );
+  assert.equal(cmdbuildPrepared.terminal, false);
+  assert.equal(cmdbuildPrepared.cmdbuild_base_url, 'http://cmdbuild.local/cmdbuild');
+  assert.equal(cmdbuildPrepared.router_lookup_value, body.router_ref);
+  const decodedSearchUrl = decodeURIComponent(cmdbuildPrepared.router_search_url);
+  assert.ok(decodedSearchUrl.includes('"or"'));
+  assert.ok(decodedSearchUrl.includes('"Description"'));
+  assert.ok(decodedSearchUrl.includes('"hostname"'));
+  assert.ok(decodedSearchUrl.includes('"Code"'));
+
+  const runCmdbuildParse = runner(cmdbuildParseCode, {
+    $: nodeLookup({ 'Подготовка CMDBuild контекста': cmdbuildPrepared }),
+  });
+  const contextNotFound = responseOf(
+    await runCmdbuildParse({
+      statusCode: 200,
+      body: { success: true, data: [], meta: { total: 0 } },
+    }),
+  );
+  assert.equal(contextNotFound.terminal, true);
+  assert.equal(contextNotFound.response.runbook_status, 'ERROR');
+  assert.equal(contextNotFound.response.error.code, 'router_not_found');
+
+  const unresolvedAccepted = responseOf(
+    await runner(prepareCode)(
+      request({
+        host: body.problem_host,
+        problemUrl: body.problemUrl,
+        service_request: body.service_request,
+        poll_interval_minutes: 15,
+        timeout_minutes: 60,
+        from: body.from,
+        replyTo: body.replyTo,
+        invocation: providerMonitorAsync('kafka_event', { result_topic: 'external.events' }),
+      }),
+      env,
+    ),
+  );
+  const unresolvedPrepared = responseOf(
+    await runner(cmdbuildPrepareCode)(unresolvedAccepted, { CMDBUILD_BASE_URL: 'http://cmdbuild.local/cmdbuild' }),
+  );
+  const unresolvedParse = runner(cmdbuildParseCode, {
+    $: nodeLookup({ 'Подготовка CMDBuild контекста': unresolvedPrepared }),
+  });
+  const unresolved = responseOf(
+    await unresolvedParse({
+      statusCode: 200,
+      body: { success: true, data: [], meta: { total: 0 } },
+    }),
+  );
+  assert.equal(unresolved.response.error.code, 'router_context_not_resolved');
+  assert.equal(unresolved.response.email_dispatch, null);
+  assert.equal(unresolved.response.router_lookup_status, 'not_found');
+
+  const parsedRouter = responseOf(
+    await runCmdbuildParse({
+      statusCode: 200,
+      body: {
+        success: true,
+        data: [
+          {
+            _id: 1308541,
+            Code: 'c2m-ntbook-routerg-000',
+            Description: body.router_ref,
+            hostname: 'c2m-ntbook-routerg-000',
+            email: 'provider@example.test',
+            contract: 'CNT-100500',
+            ipaddress: 427547,
+            Location: 206,
+          },
+        ],
+        meta: { total: 1 },
       },
-    })(accepted, env),
+    }),
+  );
+  assert.equal(parsedRouter.terminal, false);
+  assert.equal(parsedRouter.router_lookup_status, 'resolved');
+  assert.equal(parsedRouter.router_hostname, 'c2m-ntbook-routerg-000');
+  assert.equal(parsedRouter.provider_email, 'provider@example.test');
+  assert.equal(parsedRouter.contract, 'CNT-100500');
+
+  const cmdbuildNormalized = responseOf(
+    await runner(cmdbuildNormalizeCode, {
+      $: nodeLookup({
+        'Разбор routerG для письма': parsedRouter,
+        'CMDBuild чтение IpAddress': {
+          statusCode: 200,
+          body: { success: true, data: { _id: 427547, Description: '192.0.2.10' } },
+        },
+        'CMDBuild чтение Room': {
+          statusCode: 200,
+          body: { success: true, data: { _id: 206, Description: 'Москва, ул. Тестовая, д. 1', Floor: 101 } },
+        },
+        'CMDBuild чтение Floor': {
+          statusCode: 200,
+          body: { success: true, data: { _id: 101, Description: 'Этаж 1', Building: 51 } },
+        },
+        'CMDBuild чтение Building': {
+          statusCode: 200,
+          body: { success: true, data: { _id: 51, Description: 'Здание 1', City: 'Москва' } },
+        },
+      }),
+    })(parsedRouter),
+  );
+  assert.equal(cmdbuildNormalized.terminal, false);
+  assert.equal(cmdbuildNormalized.provider_email_context.city, 'Москва');
+  assert.equal(cmdbuildNormalized.provider_email_context.provider_email, 'provider@example.test');
+
+  const emailPrepared = responseOf(
+    await runner(emailPrepareCode)(cmdbuildNormalized),
+  );
+  assert.equal(emailPrepared.terminal, false);
+  assert.equal(emailPrepared.toEmail, 'provider@example.test');
+  assert.equal(emailPrepared.from_email, 'automation-test@local.test');
+  assert.equal(emailPrepared.reply_to, 'automation-test@local.test');
+  assert.equal(emailPrepared.reply_mailbox_address, 'automation-test@local.test');
+  assert.ok(emailPrepared.email_subject.includes('Москва'));
+  assert.ok(emailPrepared.email_body.includes('12345678'));
+
+  const initialOk = responseOf(
+    await runner(emailResultCode, {
+      $: nodeLookup({ 'Подготовка email провайдеру': emailPrepared }),
+    })({}),
   );
   assert.equal(initialOk.terminal, false);
-  assert.equal(initialOk.provider_email_context.provider_email, 'provider@example.test');
   assert.equal(initialOk.email_dispatch.status, 'sent');
-  assert.equal(initialCalls.length, 2);
-  assert.deepEqual(initialCalls[1].body.params, {
-    city: 'Москва',
-    location: 'Москва, ул. Тестовая, д. 1',
-    ip_address: '192.0.2.10',
-    contract: 'CNT-100500',
-    service_request: '12345678',
-  });
+  assert.equal(initialOk.email_dispatch.to, 'provider@example.test');
+  assert.equal(initialOk.email_dispatch.from, 'automation-test@local.test');
+  assert.equal(initialOk.email_dispatch.reply_to, 'automation-test@local.test');
+  assert.equal(initialOk.email_dispatch.reply_mailbox_address, 'automation-test@local.test');
 
   const initialFailed = responseOf(
-    await runner(initialCode, {
-      helpers: {
-        async httpRequest() {
-          throw new Error('cmdbuild unavailable token secret');
-        },
-      },
-    })(accepted, env),
+    await runner(emailResultCode, {
+      $: nodeLookup({ 'Подготовка email провайдеру': emailPrepared }),
+    })({ error: { message: 'smtp token secret failure' } }),
   );
   assert.equal(initialFailed.terminal, true);
   assert.equal(initialFailed.response.runbook_status, 'ERROR');
-  assert.equal(initialFailed.response.error.code, 'provider_context_failed');
+  assert.equal(initialFailed.response.error.code, 'provider_email_send_failed');
   assert.ok(!initialFailed.response.error.reason.includes('token'));
 
   const resolved = responseOf(
@@ -2530,6 +2807,8 @@ async function testProviderChannelRepairMonitor() {
 
   const sqlState = responseOf(await runner(buildSqlCode)(activeProblem));
   assert.ok(sqlState.sql.includes('n8n_mail_index'));
+  assert.ok(sqlState.sql.includes('mailbox_address'));
+  assert.ok(sqlState.sql.includes('automation-test@local.test'));
   assert.ok(sqlState.sql.includes('12345678'));
   assert.ok(sqlState.sql.includes('WITH matches AS'));
 
@@ -2545,6 +2824,7 @@ async function testProviderChannelRepairMonitor() {
   const firstMatch = {
     message_id: '<provider-1@example.test>',
     mailbox: 'INBOX',
+    mailbox_address: 'automation-test@local.test',
     from_email: 'provider@example.test',
     subject: 'Re: заявка 12345678',
     body_text: 'Ваше обращение зарегистрировано.',
@@ -2558,6 +2838,7 @@ async function testProviderChannelRepairMonitor() {
     await runner(evaluateCode)({
       state_json: JSON.stringify(stateForRows),
       match_count: 1,
+      mailbox_indexed_count: 1,
       delivery_failure_count: 0,
       first_match_json: JSON.stringify(firstMatch),
     }),
@@ -2571,6 +2852,7 @@ async function testProviderChannelRepairMonitor() {
     await runner(evaluateCode)({
       state_json: JSON.stringify(stateForRows),
       match_count: 2,
+      mailbox_indexed_count: 1,
       delivery_failure_count: 0,
       first_match_json: JSON.stringify(firstMatch),
     }),
@@ -2598,21 +2880,76 @@ async function testProviderChannelRepairMonitor() {
     await runner(evaluateCode)({
       state_json: JSON.stringify({ ...stateForRows, deadline_at: past }),
       match_count: 0,
+      mailbox_indexed_count: 1,
       delivery_failure_count: 0,
     }),
   );
   assert.equal(notFound.response.runbook_status, 'NOT_FOUND');
 
+  const mailboxNotIndexed = responseOf(
+    await runner(evaluateCode)({
+      state_json: JSON.stringify({ ...stateForRows, deadline_at: past }),
+      match_count: 0,
+      mailbox_indexed_count: 0,
+      delivery_failure_count: 0,
+    }),
+  );
+  assert.equal(mailboxNotIndexed.response.runbook_status, 'ERROR');
+  assert.equal(mailboxNotIndexed.response.error.code, 'reply_mailbox_not_indexed');
+
   const waiting = responseOf(
     await runner(evaluateCode)({
       state_json: JSON.stringify(stateForRows),
       match_count: 0,
+      mailbox_indexed_count: 1,
       delivery_failure_count: 0,
     }),
   );
   assert.equal(waiting.terminal, false);
   assert.ok(waiting.next_wait_seconds > 0);
   assert.ok(Date.parse(waiting.next_wait_at) > Date.now());
+  assert.equal(waiting.response.runbook_status, 'PROGRESS');
+  assert.equal(waiting.polling_diagnostic.current_status, 'polling');
+  assert.equal(waiting.polling_diagnostic.checked_resource, 'n8n_mail_index');
+  assert.equal(waiting.polling_diagnostic.poll_iteration, 1);
+  assert.equal(waiting.polling_diagnostic.match_count, 0);
+  assert.equal(waiting.polling_diagnostic.mailbox_indexed_count, 1);
+  assert.equal(waiting.polling_diagnostic.reply_mailbox_address, 'automation-test@local.test');
+
+  const progressEvent = responseOf(
+    await runner(deliverCode)({
+      ...waiting,
+      async_callback: providerMonitorAsync('kafka_event', { result_topic: 'external.events' }).extensions.async_callback,
+    }),
+  );
+  assert.equal(progressEvent.externalEvent.status, 'progress');
+  assert.equal(progressEvent.externalEvent.result.runbook_status, 'PROGRESS');
+  assert.equal(progressEvent.externalEvent.result.polling_diagnostic.poll_iteration, 1);
+  assert.equal(progressEvent.externalEvent.result.polling_diagnostic.match_count, 0);
+  assert.equal(
+    progressEvent.externalEvent.idempotency_key,
+    'case-000000000001:tool_command:cmd-provider-monitor-123:provider_channel_repair_progress_1',
+  );
+  assert.equal(progressEvent.shouldPublishKafka, true);
+
+  assertMainConnectionIncludes(
+    'workflows/provider-channel-repair-monitor-webhook.json',
+    'Email завершил ранбук?',
+    1,
+    'Доставка polling diagnostics',
+  );
+  assertMainConnectionIncludes(
+    'workflows/provider-channel-repair-monitor-webhook.json',
+    'Доставка polling diagnostics',
+    0,
+    'Нужна Kafka delivery diagnostics?',
+  );
+  assertMainConnectionIncludes(
+    'workflows/provider-channel-repair-monitor-webhook.json',
+    'Завершение polling diagnostics',
+    0,
+    'Ожидание следующего опроса',
+  );
 
   const callbackCalls = [];
   const delivered = responseOf(
@@ -2626,6 +2963,10 @@ async function testProviderChannelRepairMonitor() {
     })(
       {
         ...ok,
+        response: {
+          ...ok.response,
+          delivery_status: { requested_transport: 'http_callback' },
+        },
         async_callback: providerMonitorAsync('http_callback', {
           callback_url: 'http://127.0.0.1:18088/external-events/n8n',
         }).extensions.async_callback,
@@ -2636,7 +2977,9 @@ async function testProviderChannelRepairMonitor() {
   assert.equal(callbackCalls.length, 1);
   assert.equal(callbackCalls[0].headers['X-ServiceDesk-Callback-Token'], 'callback-token');
   assert.equal(callbackCalls[0].body.status, 'success');
+  assert.deepEqual(callbackCalls[0].body, delivered.externalEvent);
   assert.equal(delivered.externalEvent.result.runbook_status, 'OK');
+  assert.equal(delivered.externalEvent.result.delivery_status, undefined);
   assert.equal(
     delivered.externalEvent.idempotency_key,
     'case-000000000001:tool_command:cmd-provider-monitor-123:provider_channel_repair_ok',
@@ -2666,7 +3009,7 @@ async function testProviderChannelRepairMonitor() {
   assert.equal(failedCallbackBoth.kafkaTopic, 'external.events');
   assert.equal(failedCallbackBoth.delivery_status.http_callback, 'failed');
   assert.equal(failedCallbackBoth.delivery_status.http_callback_error, 'callback_delivery_failed');
-  assert.equal(failedCallbackBoth.externalEvent.result.delivery_status.http_callback, 'failed');
+  assert.equal(failedCallbackBoth.externalEvent.result.delivery_status, undefined);
 
   const timeoutEvent = responseOf(
     await runner(deliverCode)({
@@ -2677,6 +3020,16 @@ async function testProviderChannelRepairMonitor() {
   assert.equal(timeoutEvent.externalEvent.status, 'timeout');
   assert.equal(timeoutEvent.shouldPublishKafka, true);
   assert.equal(timeoutEvent.kafkaTopic, 'external.events');
+
+  const errorEvent = responseOf(
+    await runner(deliverCode)({
+      ...deliveryFailed,
+      async_callback: providerMonitorAsync('kafka_event', { result_topic: 'external.events' }).extensions.async_callback,
+    }),
+  );
+  assert.equal(errorEvent.externalEvent.status, 'error');
+  assert.equal(errorEvent.externalEvent.error.code, 'DELIVERY_FAILED');
+  assert.equal(errorEvent.externalEvent.error.message, deliveryFailed.response.message);
 }
 
 function testOpenApiAndCatalog() {
@@ -2753,6 +3106,14 @@ function testOpenApiAndCatalog() {
   assert.ok(sendTemplate400.invalidRenderedSubject);
   assert.ok(sendTemplate400.renderedSubjectTooLong);
   assert.ok(sendTemplate400.renderedBodyTooLong);
+  const sendEmail400 = openapi.paths['/webhook/email/send'].post.responses['400'].content['application/json'].examples;
+  assert.equal(sendEmail400.missingFrom.value.error.code, 'missing_from');
+  assert.equal(sendEmail400.missingReplyTo.value.error.code, 'missing_reply_to');
+  assert.equal(openapi.paths['/webhook/email/send'].post.responses['500'], undefined);
+  const sendTemplate400Again = openapi.paths['/webhook/email/send-template'].post.responses['400'].content['application/json'].examples;
+  assert.equal(sendTemplate400Again.missingFrom.value.error.code, 'missing_from');
+  assert.equal(sendTemplate400Again.missingReplyTo.value.error.code, 'missing_reply_to');
+  assert.equal(openapi.paths['/webhook/email/send-template'].post.responses['500'], undefined);
   assert.equal(openapi.components.schemas.EmailTemplateParam.properties.sensitive.type, 'boolean');
   assert.equal(openapi.components.schemas.EmailTemplateParam.properties.sensitive.default, false);
 
@@ -2940,17 +3301,21 @@ function testOpenApiAndCatalog() {
     '#/components/schemas/MonitorProviderChannelRepairResult',
   );
   const providerMonitorRequest = openapi.components.schemas.MonitorProviderChannelRepairRequest;
-  assert.deepEqual(providerMonitorRequest.required, ['invocation']);
+  assert.deepEqual(providerMonitorRequest.required, ['invocation', 'from']);
   assertRequiredAlternatives(providerMonitorRequest, [
-    [['host'], ['hostname'], ['hostName']],
+    [['problem_host'], ['problemHost'], ['router_ref'], ['routerRef'], ['host'], ['hostname'], ['hostName']],
     [['problemUrl'], ['problem_url']],
     [['service_request'], ['serviceRequest']],
     [['poll_interval_minutes'], ['pollIntervalMinutes']],
     [['timeout_minutes'], ['timeoutMinutes']],
+    [['replyTo'], ['reply_to']],
   ]);
+  assert.equal(providerMonitorRequest.properties.router_ref.maxLength, 500);
   assert.equal(providerMonitorRequest.properties.poll_interval_minutes.maximum, 60);
   assert.equal(providerMonitorRequest.properties.timeout_minutes.maximum, 240);
   assert.equal(providerMonitorRequest.properties.templateId.default, 'provider_channel_outage_test');
+  assert.ok(openapi.components.schemas.MonitorProviderChannelRepairResult.properties.router_lookup_status);
+  assert.ok(openapi.components.schemas.MonitorProviderChannelRepairResult.properties.router_candidates);
   assert.deepEqual(openapi.components.schemas.MonitorProviderChannelRepairResultStatus.enum, [
     'RESOLVED',
     'OK',
@@ -3004,7 +3369,7 @@ function testOpenApiAndCatalog() {
   assert.equal(cmdbuildContext.read_only, true);
   assert.equal(cmdbuildContext.openapi_operation_id, 'getProviderEmailContext');
   assert.equal(cmdbuildContext.cmdbuild.class_name, 'routerG');
-  assert.equal(cmdbuildContext.cmdbuild.search_attribute, 'Description');
+  assert.deepEqual(cmdbuildContext.cmdbuild.search_attributes, ['Description', 'hostname', 'Code']);
   assert.deepEqual(cmdbuildContext.cmdbuild.required_router_attributes, ['email', 'contract', 'ipaddress', 'Location']);
 
   const hrVerify = catalog.workflows.find((workflow) => workflow.workflow_id === 'hr_verify_manager');
@@ -3140,6 +3505,10 @@ function testOpenApiAndCatalog() {
   ]);
   assert.equal(providerMonitor.result_delivery.default_result_topic, 'external.events');
   assert.deepEqual(providerMonitor.result_delivery.supported_transports, ['http_callback', 'kafka_event', 'both']);
+  assert.equal(providerMonitor.progress_diagnostics.enabled, true);
+  assert.equal(providerMonitor.progress_diagnostics.delivery, 'ExternalEvent.status=progress');
+  assert.ok(providerMonitor.progress_diagnostics.fields.includes('mailbox_indexed_count'));
+  assert.ok(providerMonitor.progress_diagnostics.fields.includes('match_count'));
 }
 
 async function testContractDiscoveryLocalization() {
@@ -3278,6 +3647,29 @@ function assertCredentialReference(node, credentialType, expected) {
   assert.deepEqual(node.credentials?.[credentialType], expected);
 }
 
+function testEmailMailIdentityContracts() {
+  for (const workflowPath of [
+    'workflows/send-email-webhook.json',
+    'workflows/send-templated-email-webhook.json',
+    'workflows/provider-channel-repair-monitor-webhook.json',
+  ]) {
+    const raw = readFileSync(workflowPath, 'utf8');
+    assert.ok(!raw.includes('N8N_MAIL_IDENTITY_ADDRESS'), `${workflowPath}: must not use N8N_MAIL_IDENTITY_ADDRESS`);
+    assert.ok(!raw.includes('N8N_MAIL_FROM'), `${workflowPath}: must not use N8N_MAIL_FROM`);
+    assert.ok(!raw.includes('noreply@local.dev'), `${workflowPath}: must not use noreply fallback`);
+  }
+
+  for (const [workflowPath, nodeId] of [
+    ['workflows/send-email-webhook.json', 'send-email-node'],
+    ['workflows/send-templated-email-webhook.json', 'send-templated-email-node'],
+    ['workflows/provider-channel-repair-monitor-webhook.json', 'provider-channel-monitor-email-send'],
+  ]) {
+    const node = workflowNode(workflowPath, nodeId);
+    assert.equal(node.parameters.fromEmail, '={{ $json.from_email }}');
+    assert.equal(node.parameters.options.replyTo, '={{ $json.reply_to }}');
+  }
+}
+
 function testLocalCredentialReferences() {
   const smtp = {
     id: 'Fh3kVhbHL6XxDh1c',
@@ -3363,6 +3755,24 @@ function testLocalCredentialReferences() {
     'kafka',
     kafka,
   );
+  assertCredentialReference(
+    workflowNode('workflows/provider-channel-repair-monitor-webhook.json', 'provider-channel-monitor-email-send'),
+    'smtp',
+    smtp,
+  );
+  for (const nodeId of [
+    'provider-channel-monitor-cmdbuild-search-router',
+    'provider-channel-monitor-cmdbuild-get-ip',
+    'provider-channel-monitor-cmdbuild-get-room',
+    'provider-channel-monitor-cmdbuild-get-floor',
+    'provider-channel-monitor-cmdbuild-get-building',
+  ]) {
+    assertCredentialReference(
+      workflowNode('workflows/provider-channel-repair-monitor-webhook.json', nodeId),
+      'httpBasicAuth',
+      cmdbuild,
+    );
+  }
   for (const nodeId of [
     'cmdbuild-provider-context-search-router',
     'cmdbuild-provider-context-get-ip',
@@ -3419,6 +3829,7 @@ async function main() {
   testOpenApiAndCatalog();
   await testContractDiscoveryLocalization();
   testWorkflowInlineDocumentation();
+  testEmailMailIdentityContracts();
   testLocalCredentialReferences();
   process.stdout.write('contract tests passed\n');
 }

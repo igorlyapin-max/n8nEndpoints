@@ -83,7 +83,7 @@ curl -sS -o /tmp/n8n-cmdbuild-context-missing-hostname.json -w '%{http_code}\n' 
 
 Expected HTTP status: `400`, body contains `error.code: missing_hostname`.
 
-Happy path requires one active `routerG` card whose `Description` matches the request and whose `email`, `contract`, `ipaddress`, `Location`, `Room.Floor`, `Floor.Building`, and `Building.City` are filled:
+Happy path requires one active `routerG` card whose `Description`, `hostname` or `Code` matches the request and whose `email`, `contract`, `ipaddress`, `Location`, `Room.Floor`, `Floor.Building`, and `Building.City` are filled:
 
 ```bash
 curl -fsS \

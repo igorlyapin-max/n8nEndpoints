@@ -31,9 +31,10 @@ Body:
 ```json
 {
   "to": ["provider@example.com"],
+  "from": "automation-test@local.test",
   "cc": ["manager@example.com"],
   "bcc": ["audit@example.com"],
-  "replyTo": "support@example.com",
+  "replyTo": "automation-test@local.test",
   "templateId": "provider_line_repair_request",
   "params": {
     "localTicketNumber": "ГКМ12345678",
@@ -48,7 +49,7 @@ Body:
 }
 ```
 
-`to`, `cc` и `bcc` можно передавать строкой, строкой с разделителями `,` или `;`, либо массивом строк. `cc`, `bcc` и `replyTo` необязательны.
+`to`, `cc` и `bcc` можно передавать строкой, строкой с разделителями `,` или `;`, либо массивом строк. `cc` и `bcc` необязательны; `from` и `replyTo` обязательны.
 
 `params` должен содержать все поля из `required_params` выбранного шаблона. Плейсхолдеры в `subject_template` и `body_template` имеют вид `{{paramName}}`.
 
@@ -86,6 +87,8 @@ Attachments в версии v1 не поддерживаются. Если за�
 - `400 missing_template_params` - отсутствуют обязательные параметры шаблона.
 - `400 invalid_template_param` - параметр не прошел проверку `type`, `pattern`, длины или control characters.
 - `400 invalid_email` - некорректный адрес в `to`, `cc`, `bcc` или `replyTo`.
+- `400 missing_from` - не передан обязательный SMTP From адрес.
+- `400 missing_reply_to` - не передан обязательный Reply-To адрес.
 - `400 attachments_not_supported` - передан attachment.
 - `400 empty_rendered_subject` - после подстановки тема пустая.
 - `400 invalid_rendered_subject` - после подстановки тема содержит `CR`, `LF` или control characters.
@@ -117,7 +120,8 @@ Attachments в версии v1 не поддерживаются. Если за�
 ```json
 {
   "to": ["provider@example.com"],
-  "replyTo": "support@example.com",
+  "from": "automation-test@local.test",
+  "replyTo": "automation-test@local.test",
   "templateId": "provider_channel_outage_test",
   "params": {
     "city": "Москва",

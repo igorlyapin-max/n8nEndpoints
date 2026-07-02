@@ -90,7 +90,7 @@ Workflow dual-use: direct HTTP режим предназначен для кор
 - Usage: `docs/runbooks/cmdbuild-provider-email-context-usage.md`
 - Deployment: `docs/runbooks/cmdbuild-provider-email-context-deployment.md`
 
-Workflow read-only: по `hostname` ищет активный `routerG`, где `Description == hostname`, и возвращает `city`, `location`, `ip_address`, `contract`, `provider_email` для последующей отправки письма по шаблону отдельной оберткой.
+Workflow read-only: по `hostname` ищет активный `routerG`, где точное совпадение найдено в `Description`, `hostname` или `Code`, и возвращает `city`, `location`, `ip_address`, `contract`, `provider_email` для последующей отправки письма.
 
 Ранбук проверки заявленного руководителя по кадровой выгрузке:
 
@@ -176,7 +176,7 @@ Workflow async-only: принимает `problemUrl`, `poll_interval_minutes`, `
 - Usage: `docs/runbooks/provider-channel-repair-monitor-usage.md`
 - Deployment: `docs/runbooks/provider-channel-repair-monitor-deployment.md`
 
-Workflow async-only: по `host` получает параметры письма из CMDBuild, отправляет провайдеру шаблон `provider_channel_outage_test`, затем до `timeout_minutes` сначала проверяет Zabbix problem status, а после этого ищет письмо провайдера по `service_request` в индексе входящих писем. Terminal result возвращается через canonical `ExternalEvent` в callback/Kafka тому же ожидающему агенту.
+Workflow async-only: по `host` inline получает параметры письма из CMDBuild, отправляет провайдеру plain text email через SMTP credential, затем до `timeout_minutes` сначала проверяет Zabbix problem status, а после этого ищет письмо провайдера по `service_request` в индексе входящих писем. Terminal result возвращается через canonical `ExternalEvent` в callback/Kafka тому же ожидающему агенту.
 
 Локальный стенд для проверки получения и автоответов без mailbox заказчика:
 
@@ -203,15 +203,16 @@ Workflow async-only: по `host` получает параметры письм�
 ```json
 {
   "to": ["user@example.com"],
+  "from": "automation-test@local.test",
   "cc": ["manager@example.com"],
   "bcc": ["audit@example.com"],
-  "replyTo": "support@example.com",
+  "replyTo": "automation-test@local.test",
   "subject": "Тема письма",
   "body": "Текст письма"
 }
 ```
 
-`to`, `cc` и `bcc` можно передавать строкой или массивом строк. `cc`, `bcc` и `replyTo` необязательны. Attachment в версии v1 не поддерживается.
+`to`, `cc` и `bcc` можно передавать строкой или массивом строк. `cc` и `bcc` необязательны; `from` и `replyTo` обязательны. Attachment в версии v1 не поддерживается.
 
 Контракт отправки email по шаблону:
 
@@ -223,7 +224,8 @@ Workflow async-only: по `host` получает параметры письм�
 ```json
 {
   "to": ["provider@example.com"],
-  "replyTo": "support@example.com",
+  "from": "automation-test@local.test",
+  "replyTo": "automation-test@local.test",
   "templateId": "provider_line_repair_request",
   "params": {
     "localTicketNumber": "ГКМ12345678",
@@ -241,7 +243,8 @@ Workflow async-only: по `host` получает параметры письм�
 ```json
 {
   "to": ["provider@example.com"],
-  "replyTo": "support@example.com",
+  "from": "automation-test@local.test",
+  "replyTo": "automation-test@local.test",
   "templateId": "provider_channel_outage_test",
   "params": {
     "city": "Москва",
@@ -320,7 +323,7 @@ ZABBIX_API_URLS_BY_ORIGIN={"http://localhost:8081":"http://zabbix-web:8080/api_j
 1. Открыть workflow в UI: `http://127.0.0.1:5678`.
 2. В node `Отправка email` выбрать или создать SMTP credentials для стандартного `Send Email` node.
 3. Убедиться, что в окружении n8n задан `N8N_WEBHOOK_TOKEN`.
-4. Опционально задать `N8N_MAIL_FROM`, иначе workflow использует `noreply@local.dev`.
+4. Задать `from` и `replyTo` передаются в payload ранбука; SMTP/IMAP credentials остаются в n8n.
 5. Активировать workflow.
 
 Пример вызова из CLI:

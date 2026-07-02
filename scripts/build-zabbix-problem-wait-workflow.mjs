@@ -3,6 +3,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import process from 'node:process';
 import { documentedWorkflow } from './workflow-inline-documentation.mjs';
+import { serviceDeskEnvironmentExpression } from './servicedesk-async-runbook-runtime.mjs';
 
 const WORKFLOW_PATH = 'workflows/wait-zabbix-problem-status-webhook.json';
 
@@ -10,6 +11,8 @@ const LOCAL_KAFKA_CREDENTIAL = {
   id: 'localRedpandaKafka',
   name: 'Local Redpanda Kafka',
 };
+
+const SERVICE_DESK_ENVIRONMENT_EXPR_SINGLE = serviceDeskEnvironmentExpression({ quote: "'" });
 
 function stableJson(value) {
   return JSON.stringify(value, null, 2);
@@ -87,7 +90,7 @@ const validateCallbackUrl = (value) => {
   if (!parsed) return { reason: 'invalid_url' };
   if (!['http:', 'https:'].includes(parsed.protocol)) return { reason: 'invalid_scheme' };
   if (parsed.hasCredentials) return { reason: 'credentials_not_allowed' };
-  const envName = stringValue(envValue('NODE_ENV') || envValue('N8N_ENVIRONMENT') || envValue('ENVIRONMENT')).toLowerCase();
+  const envName = stringValue(${SERVICE_DESK_ENVIRONMENT_EXPR_SINGLE}).toLowerCase();
   const localEnv = !envName || envName === 'development' || envName === 'dev' || envName === 'local' || envName === 'test';
   const production = envName === 'production' || envName === 'prod';
   const hostname = parsed.hostname.toLowerCase();
@@ -499,12 +502,12 @@ function workflow() {
       },
       'Запрос валиден?': {
         main: [
-          [{ node: 'Ответ accepted', type: 'main', index: 0 }],
+          [
+            { node: 'Ответ accepted', type: 'main', index: 0 },
+            { node: 'Проверка статуса Zabbix', type: 'main', index: 0 },
+          ],
           [{ node: 'Ответ ошибки валидации', type: 'main', index: 0 }],
         ],
-      },
-      'Ответ accepted': {
-        main: [[{ node: 'Проверка статуса Zabbix', type: 'main', index: 0 }]],
       },
       'Проверка статуса Zabbix': {
         main: [[{ node: 'Zabbix ожидание завершено?', type: 'main', index: 0 }]],

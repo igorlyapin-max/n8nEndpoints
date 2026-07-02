@@ -302,7 +302,7 @@ function workflow() {
         ],
       },
     },
-    active: false,
+    active: true,
     settings: {
       executionOrder: 'v1',
       saveDataErrorExecution: 'none',

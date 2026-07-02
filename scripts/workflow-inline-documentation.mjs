@@ -189,8 +189,8 @@ const WORKFLOW_DOCUMENTATION = {
         errors: 'Если shouldSend=false, письмо не отправляется и caller получает structured validation error.',
       },
       'Отправка email': {
-        does: 'Отправляет text email через SMTP credential, включая optional cc/bcc/replyTo.',
-        reliesOn: 'SMTP credential, N8N_MAIL_FROM или fallback noreply@local.dev, toEmail/subject/body из Code node.',
+        does: 'Отправляет text email через SMTP credential, включая required from/replyTo and optional cc/bcc.',
+        reliesOn: 'SMTP credential, обязательные from/replyTo из payload и toEmail/subject/body из Code node.',
         errors: 'SMTP failure не бросает workflow благодаря continueOnFail и обрабатывается узлом результата отправки.',
       },
       'Результат отправки': {
@@ -252,12 +252,12 @@ const WORKFLOW_DOCUMENTATION = {
   IZL94y092Lk9Yius: {
     description: [
       'Логика работы: отправляет plain text email по прямому webhook без шаблонов.',
-      'Workflow валидирует token, recipients, subject/body и optional cc/bcc/replyTo, затем отправляет через SMTP credential.',
+      'Workflow валидирует token, recipients, subject/body и required from/replyTo and optional cc/bcc, затем отправляет через SMTP credential.',
       'Отладка: проверить N8N_WEBHOOK_TOKEN, SMTP credential GreenMail/production, выполнить auth-negative и happy-path smoke, затем проверить mailbox.',
     ],
     nodes: {
       'Webhook отправки письма': {
-        does: 'Принимает POST /webhook/email/send с to, subject, body и optional cc/bcc/replyTo.',
+        does: 'Принимает POST /webhook/email/send с to, subject, body и required from/replyTo and optional cc/bcc.',
         reliesOn: 'Header X-ServiceDesk-Token и production webhook registration.',
         errors: 'Без token возвращается 401; формат body валидирует Code node.',
       },
@@ -273,7 +273,7 @@ const WORKFLOW_DOCUMENTATION = {
       },
       'Отправка email': {
         does: 'Отправляет plain text email через SMTP credential.',
-        reliesOn: 'SMTP credential, N8N_MAIL_FROM или fallback noreply@local.dev, prepared toEmail/subject/body.',
+        reliesOn: 'SMTP credential, обязательные from/replyTo из payload и prepared toEmail/subject/body.',
         errors: 'SMTP failures передаются в result node благодаря continueOnFail.',
       },
       'Результат отправки': {
@@ -414,7 +414,7 @@ const WORKFLOW_DOCUMENTATION = {
   getCmdbuildProviderEmailContext: {
     description: [
       'Логика работы: read-only получает из CMDBuild параметры для письма провайдеру по hostname routerG.',
-      'Workflow валидирует token/hostname, ищет активный routerG по точному Description, читает IpAddress, Room, Floor и Building через CMDBuild REST и возвращает city/location/ip_address/contract/provider_email.',
+      'Workflow валидирует token/hostname, ищет активный routerG по точному Description, hostname или Code, читает IpAddress, Room, Floor и Building через CMDBuild REST и возвращает city/location/ip_address/contract/provider_email.',
       'Отладка: проверить N8N_WEBHOOK_TOKEN, CMDBUILD_BASE_URL, credential Local CMDBuild Admin Test, затем выполнить auth-negative, missing-hostname, missing-field и happy-path smoke.',
     ],
     nodes: {
@@ -434,7 +434,7 @@ const WORKFLOW_DOCUMENTATION = {
         errors: 'False branch завершает workflow structured error response без CMDBuild REST calls.',
       },
       'Поиск routerG': {
-        does: 'Ищет routerG cards по exact Description через CMDBuild REST.',
+        does: 'Ищет routerG cards по exact Description, hostname или Code через CMDBuild REST.',
         reliesOn: 'HTTP Basic credential Local CMDBuild Admin Test и router_search_url.',
         errors: 'HTTP status не роняет workflow; следующий Code node нормализует auth/lookup/not found/not unique.',
       },
@@ -483,8 +483,8 @@ const WORKFLOW_DOCUMENTATION = {
   providerChannelRepairMonitor: {
     description: [
       'Логика работы: отправляет провайдеру письмо о пропадании канала и асинхронно мониторит восстановление через Zabbix и входящую почту.',
-      'Workflow валидирует token и async_callback, возвращает accepted, получает параметры письма из CMDBuild, отправляет шаблон provider_channel_outage_test, затем в цикле сначала проверяет Zabbix status, а потом ищет ответ провайдера в n8n_mail_index.',
-      'Отладка: включить N8N_WORKFLOW_DEBUG=Basic, проверить dependent workflows CMDBuild/email-template/Zabbix status, Postgres/Kafka credentials и выполнить auth-negative, validation-negative, short-timeout и mocked/provider mailbox smoke.',
+      'Workflow валидирует token и async_callback, запускает worker-ветку через Execute Sub-workflow без ожидания, возвращает accepted, а worker читает CMDBuild context, отправляет email через SMTP credential, затем в цикле сначала проверяет Zabbix status, а потом ищет ответ провайдера в n8n_mail_index.',
+      'Отладка: включить N8N_WORKFLOW_DEBUG=Basic, проверить CMDBUILD_BASE_URL, CMDBuild/SMTP/Postgres/Kafka credentials, Zabbix status workflow и выполнить auth-negative, validation-negative, short-timeout и provider mailbox smoke.',
     ],
     nodes: {
       'Webhook мониторинга ремонта канала': {
@@ -492,13 +492,23 @@ const WORKFLOW_DOCUMENTATION = {
         reliesOn: 'Production webhook registration и вызывающий dispatcher, который передает X-ServiceDesk-Token.',
         errors: 'До activation endpoint вернет 404; malformed body валидирует следующий Code node.',
       },
+      'Worker мониторинга ремонта канала': {
+        does: 'Стартует side-effect ветку через Execute Workflow Trigger; принимает весь валидированный state от acceptor.',
+        reliesOn: 'Узел Запуск worker мониторинга с waitForSubWorkflow=false и stable workflow id providerChannelRepairMonitor.',
+        errors: 'Если Execute Sub-workflow не стартует worker execution, caller получает ошибку до accepted.',
+      },
       'Подготовка запроса мониторинга': {
         does: 'Валидирует auth, входные параметры, async_callback, result_transport и internal webhook base URL.',
         reliesOn: 'N8N_WEBHOOK_TOKEN, optional N8N_INTERNAL_WEBHOOK_BASE_URL/N8N_WEBHOOK_BASE_URL и ServiceDesk async callback contract.',
         errors: 'Возвращает 400/401/500 для missing host/problemUrl/service_request, invalid poll/timeout, missing callback/topic или invalid internal URL.',
       },
+      'Подготовка state worker': {
+        does: 'Передает валидированный state worker-ветки дальше к CMDBuild/SMTP/polling шагам.',
+        reliesOn: 'Passthrough payload от Execute Workflow Trigger.',
+        errors: 'Некорректный state приведет к terminal ERROR на последующих contract-first проверках.',
+      },
       'Запрос валиден?': {
-        does: 'Маршрутизирует валидный async request в accepted response или возвращает validation/auth error.',
+        does: 'Маршрутизирует валидный async request в запуск worker или возвращает validation/auth error.',
         reliesOn: 'Boolean valid из узла подготовки запроса.',
         errors: 'False branch завершает HTTP request structured error без запуска письма и polling.',
       },
@@ -507,19 +517,79 @@ const WORKFLOW_DOCUMENTATION = {
         reliesOn: 'statusCode/response из узла подготовки запроса.',
         errors: 'Неверная response shape нарушит OpenAPI error contract.',
       },
+      'Запуск worker мониторинга': {
+        does: 'Запускает worker-ветку этого workflow через Execute Sub-workflow и не ждет ее завершения.',
+        reliesOn: 'Database workflow selector providerChannelRepairMonitor, passthrough workflowInputs и waitForSubWorkflow=false.',
+        errors: 'Если sub-workflow не создан, caller получает ошибку до accepted вместо ложного запуска.',
+      },
       'Ответ accepted': {
-        does: 'Сразу отвечает ServiceDesk caller-у accepted и освобождает HTTP request.',
+        does: 'Отвечает ServiceDesk caller-у accepted после успешного запуска sub-workflow worker.',
         reliesOn: 'Accepted response с correlation_id, wait_id и result_transport из async_callback.',
         errors: 'После этого terminal result доставляется только через callback/Kafka.',
       },
-      'Получение контекста и отправка письма': {
-        does: 'Вызывает internal CMDBuild provider context endpoint и internal templated email endpoint для отправки письма провайдеру.',
-        reliesOn: 'Активные workflows getProviderEmailContext/sendTemplatedEmail, N8N_WEBHOOK_TOKEN, CMDBuild/SMTP credentials в зависимых workflows.',
-        errors: 'CMDBuild lookup или email send failure превращаются в terminal ERROR ExternalEvent.',
+      'Подготовка CMDBuild контекста': {
+        does: 'Строит CMDBuild REST URL для поиска routerG по Description, hostname или Code.',
+        reliesOn: 'CMDBUILD_BASE_URL и host из валидированного запроса.',
+        errors: 'Invalid CMDBUILD_BASE_URL превращается в terminal ERROR ExternalEvent.',
+      },
+      'CMDBuild поиск routerG': {
+        does: 'Выполняет read-only поиск routerG в CMDBuild.',
+        reliesOn: 'HTTP Basic credential Local CMDBuild Admin Test и router_search_url.',
+        errors: 'HTTP status не роняет workflow; следующий Code node нормализует auth/lookup/not found/not unique.',
+      },
+      'Разбор routerG для письма': {
+        does: 'Проверяет найденный routerG и обязательные поля email/contract/ipaddress/Location.',
+        reliesOn: 'Ответ CMDBuild search и исходный state из подготовки CMDBuild контекста.',
+        errors: 'not found/not unique/missing fields превращаются в terminal ERROR ExternalEvent.',
+      },
+      'CMDBuild контекст терминальный?': {
+        does: 'Разделяет ошибку поиска routerG и чтение связанных CMDBuild объектов.',
+        reliesOn: 'Boolean terminal из узла разбора routerG.',
+        errors: 'True branch доставляет ERROR; false branch продолжает reference lookup.',
+      },
+      'CMDBuild чтение IpAddress': {
+        does: 'Читает referenced IpAddress card для получения Description как ip_address.',
+        reliesOn: 'ip_url и HTTP Basic credential Local CMDBuild Admin Test.',
+        errors: 'HTTP/auth/schema ошибки нормализуются в узле нормализации контекста.',
+      },
+      'CMDBuild чтение Room': {
+        does: 'Читает referenced Room card для location и Floor reference.',
+        reliesOn: 'room_url и HTTP Basic credential Local CMDBuild Admin Test.',
+        errors: 'HTTP/auth/schema ошибки нормализуются в узле нормализации контекста.',
+      },
+      'CMDBuild чтение Floor': {
+        does: 'Читает referenced Floor card для Building reference.',
+        reliesOn: 'Room.Floor из ответа CMDBuild и HTTP Basic credential.',
+        errors: 'Отсутствующий Room.Floor приводит к missing_cmdbuild_field.',
+      },
+      'CMDBuild чтение Building': {
+        does: 'Читает referenced Building card для поля City.',
+        reliesOn: 'Floor.Building из ответа CMDBuild и HTTP Basic credential.',
+        errors: 'Отсутствующий Building.City приводит к missing_cmdbuild_field.',
+      },
+      'Нормализация CMDBuild контекста': {
+        does: 'Собирает provider_email_context из routerG и reference chain.',
+        reliesOn: 'Результаты чтения IpAddress, Room, Floor, Building и state из routerG.',
+        errors: 'CMDBuild REST failures и пустые обязательные reference атрибуты превращаются в terminal ERROR.',
+      },
+      'Подготовка email провайдеру': {
+        does: 'Формирует subject/body и адреса для SMTP отправки письма провайдеру.',
+        reliesOn: 'provider_email_context, direct_recipients, from/replyTo и service_request.',
+        errors: 'Пустой или некорректный provider_email превращается в terminal ERROR.',
+      },
+      'Отправка email провайдеру': {
+        does: 'Отправляет plain text email провайдеру через n8n Email Send node.',
+        reliesOn: 'SMTP credential GreenMail SMTP (local test) или production equivalent, а также from/replyTo из state.',
+        errors: 'SMTP error передается следующему Code node через continueOnFail.',
+      },
+      'Результат email провайдеру': {
+        does: 'Нормализует результат SMTP отправки в email_dispatch или terminal ERROR.',
+        reliesOn: 'Выход Email Send node и state из подготовки письма.',
+        errors: 'SMTP failure превращается в terminal ERROR ExternalEvent.',
       },
       'Начальный этап терминальный?': {
         does: 'Разделяет ошибку начального этапа и переход к polling loop.',
-        reliesOn: 'Boolean terminal из узла получения контекста и отправки письма.',
+        reliesOn: 'Boolean terminal из inline CMDBuild/email цепочки.',
         errors: 'True branch доставляет ERROR, false branch продолжает мониторинг.',
       },
       'Проверка статуса Zabbix': {
@@ -533,7 +603,7 @@ const WORKFLOW_DOCUMENTATION = {
         errors: 'False branch идет к проверке почты; true branch доставляет RESOLVED.',
       },
       'Подготовка SQL поиска письма': {
-        does: 'Строит SQL поиска service_request в subject/body индекса n8n_mail_index за вчера/сегодня.',
+        does: 'Строит SQL поиска service_request в subject/body индекса n8n_mail_index за вчера/сегодня с фильтром по reply mailbox.',
         reliesOn: 'Validated state, service_request, window_start_at и SQL escaping в Code node.',
         errors: 'Некорректный SQL или недоступная таблица проявятся в Postgres node; таблица создается автоматически.',
       },
@@ -550,7 +620,27 @@ const WORKFLOW_DOCUMENTATION = {
       'Email завершил ранбук?': {
         does: 'Разделяет terminal email/timeout result и повторный polling.',
         reliesOn: 'Boolean terminal из узла оценки ответа провайдера.',
-        errors: 'False branch продолжает ожидание; true branch доставляет ExternalEvent.',
+        errors: 'False branch доставляет progress diagnostics и продолжает ожидание; true branch доставляет terminal ExternalEvent.',
+      },
+      'Доставка polling diagnostics': {
+        does: 'Формирует progress ExternalEvent с compact polling diagnostic перед следующим Wait.',
+        reliesOn: 'response.runbook_status=PROGRESS, polling_diagnostic, async_callback и выбранный result_transport.',
+        errors: 'Callback/Kafka delivery ошибки приводят к failed execution так же, как terminal delivery.',
+      },
+      'Нужна Kafka delivery diagnostics?': {
+        does: 'Проверяет, нужно ли публиковать progress diagnostics в Kafka.',
+        reliesOn: 'shouldPublishKafka из узла доставки polling diagnostics.',
+        errors: 'False branch идет к завершению diagnostics и следующему Wait.',
+      },
+      'Публикация polling diagnostics в Kafka': {
+        does: 'Публикует progress ExternalEvent в result_topic с correlation headers.',
+        reliesOn: 'Kafka credential Local Redpanda Kafka и result_topic из async_callback.',
+        errors: 'Kafka broker/credential/topic ошибки приводят к failed execution и отсутствию progress event.',
+      },
+      'Завершение polling diagnostics': {
+        does: 'Сохраняет state после доставки progress diagnostics и передает его в Wait.',
+        reliesOn: 'Исходный state, next_wait_at и результат доставки progress ExternalEvent.',
+        errors: 'Не выполняется при failed callback или Kafka publish diagnostics.',
       },
       'Ожидание следующего опроса': {
         does: 'Приостанавливает execution до следующей итерации polling.',

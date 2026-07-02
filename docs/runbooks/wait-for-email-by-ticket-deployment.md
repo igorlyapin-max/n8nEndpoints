@@ -47,7 +47,7 @@ ssl: disabled
 The workflow creates `n8n_mail_index` automatically on first collector or wait execution:
 
 ```sql
-n8n_mail_index(message_id, mailbox, from_email, subject, body_text, received_at, indexed_at, is_delivery_failure)
+n8n_mail_index(message_id, mailbox, mailbox_address, from_email, subject, body_text, received_at, indexed_at, is_delivery_failure)
 ```
 
 ## Import
