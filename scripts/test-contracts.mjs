@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { assertWorkflowInlineDocumentation } from './workflow-inline-documentation.mjs';
+import { loadMcpToolManifest } from './mcp-tool-manifest.mjs';
 
 function readJson(path) {
   return JSON.parse(readFileSync(path, 'utf8'));
@@ -3044,6 +3045,65 @@ async function testProviderChannelRepairMonitor() {
   assert.equal(errorEvent.externalEvent.error.message, deliveryFailed.response.message);
 }
 
+function testMcpToolManifest() {
+  const { manifest } = loadMcpToolManifest();
+  assert.equal(manifest.schema_version, '1.0');
+  assert.equal(manifest.manifest_id, 'provider-ops-mcp-tools');
+  assert.equal(manifest.contract_version, '1.0');
+
+  const tools = new Map(manifest.tools.map((tool) => [tool.tool_name, tool]));
+  assert.deepEqual([...tools.keys()].sort(), [
+    'provider_channel_repair_monitor',
+    'zabbix_problem_status_wait',
+    'zabbix_problem_update',
+  ]);
+
+  const provider = tools.get('provider_channel_repair_monitor');
+  assert.equal(provider.workflow_id, 'provider_channel_repair_monitor');
+  assert.equal(provider.operation_id, 'monitorProviderChannelRepair');
+  assert.equal(provider.webhook_path, '/webhook/provider/channel-repair/monitor');
+  assert.equal(provider.execution_mode, 'async');
+  assert.equal(provider.action_id, 'monitor_provider_channel_repair');
+  assert.equal(provider.expected_event_type, 'provider_channel_repair_monitor.completed');
+  assert.equal(provider.result_mapping.type, 'accepted_ack');
+  assert.deepEqual(provider.required_inputs, ['problem_url', 'service_request']);
+  assert.equal(provider.input_mapping.problemUrl.input, 'problem_url');
+  assert.equal(provider.input_mapping.service_request.input, 'service_request');
+  assert.ok(Object.values(provider.input_mapping).some((entry) => entry.async_invocation === true));
+
+  const update = tools.get('zabbix_problem_update');
+  assert.equal(update.workflow_id, 'zabbix_problem_update');
+  assert.equal(update.operation_id, 'updateZabbixProblem');
+  assert.equal(update.webhook_path, '/webhook/zabbix/problem/update');
+  assert.equal(update.execution_mode, 'sync');
+  assert.equal(update.result_mapping.type, 'sync_result');
+  assert.deepEqual(update.required_inputs, ['problem_url', 'message']);
+
+  const wait = tools.get('zabbix_problem_status_wait');
+  assert.equal(wait.workflow_id, 'zabbix_problem_wait');
+  assert.equal(wait.operation_id, 'waitZabbixProblemStatus');
+  assert.equal(wait.webhook_path, '/webhook/zabbix/problem/wait');
+  assert.equal(wait.execution_mode, 'async');
+  assert.equal(wait.action_id, 'wait_zabbix_problem_status');
+  assert.equal(wait.expected_event_type, 'zabbix_problem_status_wait.completed');
+  assert.equal(wait.result_mapping.type, 'accepted_ack');
+  assert.deepEqual(wait.required_inputs, ['problem_url', 'poll_interval_minutes', 'timeout_minutes']);
+
+  for (const tool of manifest.tools) {
+    assert.equal(tool.input_schema.type, 'object', tool.tool_name + ': input_schema must be object');
+    assert.equal(tool.output_schema.type, 'object', tool.tool_name + ': output_schema must be object');
+    assertSchemaDescriptions(tool.input_schema, tool.tool_name + '.input_schema');
+    assertSchemaDescriptions(tool.output_schema, tool.tool_name + '.output_schema');
+  }
+}
+
+function assertSchemaDescriptions(schema, label) {
+  assert.ok(schema.properties && typeof schema.properties === 'object', label + '.properties missing');
+  for (const [property, definition] of Object.entries(schema.properties)) {
+    assert.equal(typeof definition.description, 'string', label + '.' + property + '.description missing');
+    assert.notEqual(definition.description.trim(), '', label + '.' + property + '.description empty');
+  }
+}
 function testOpenApiAndCatalog() {
   const openapi = readJson('contracts/n8n-openapi.json');
   assert.equal(openapi['x-localization'].selection, 'query_parameter');
@@ -3849,6 +3909,7 @@ async function main() {
   await testCmdbuildProviderContext();
   await testProviderChannelRepairMonitor();
   testOpenApiAndCatalog();
+  testMcpToolManifest();
   await testContractDiscoveryLocalization();
   testWorkflowInlineDocumentation();
   testEmailMailIdentityContracts();

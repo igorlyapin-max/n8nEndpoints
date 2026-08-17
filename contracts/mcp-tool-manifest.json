@@ -1,0 +1,284 @@
+{
+  "schema_version": "1.0",
+  "manifest_id": "provider-ops-mcp-tools",
+  "contract_version": "1.0",
+  "description": "ServiceDesk provider operations MCP tools backed by n8n workflows. n8n workflow and webhook details are private implementation details of this MCP environment.",
+  "source_contracts": {
+    "openapi": "contracts/n8n-openapi.json",
+    "workflow_catalog": "contracts/n8n-workflow-catalog.json"
+  },
+  "tools": [
+    {
+      "tool_name": "provider_channel_repair_monitor",
+      "capability_id": "provider_channel_repair_monitor",
+      "workflow_id": "provider_channel_repair_monitor",
+      "operation_id": "monitorProviderChannelRepair",
+      "webhook_path": "/webhook/provider/channel-repair/monitor",
+      "execution_mode": "async",
+      "action_id": "monitor_provider_channel_repair",
+      "expected_event_type": "provider_channel_repair_monitor.completed",
+      "async_context_required": true,
+      "description": "Отправляет обращение провайдеру по аварии канала связи и ожидает ответ провайдера или восстановление проблемы Zabbix.",
+      "input_aliases": {
+        "problem_url": ["problem_url", "problemUrl", "zabbix_url", "zabbixUrl"],
+        "service_request": ["service_request", "serviceRequest", "ticket_id", "ticketId", "request_number", "requestNumber"],
+        "problem_host": ["problem_host", "problemHost", "host", "hostname", "hostName"],
+        "router_ref": ["router_ref", "routerRef"],
+        "from": ["from"],
+        "reply_to": ["reply_to", "replyTo"],
+        "template_id": ["template_id", "templateId"],
+        "poll_interval_minutes": ["poll_interval_minutes", "pollIntervalMinutes"],
+        "timeout_minutes": ["timeout_minutes", "timeoutMinutes"],
+        "cc": ["cc"],
+        "bcc": ["bcc"],
+        "request_id": ["request_id", "requestId"]
+      },
+      "required_inputs": ["problem_url", "service_request"],
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["problem_url", "service_request"],
+        "properties": {
+          "problem_url": {
+            "type": "string",
+            "description": "URL проблемы Zabbix из события мониторинга, по которой провайдер должен проверить канал. Обычно соответствует слоту zabbix_url."
+          },
+          "service_request": {
+            "type": "string",
+            "description": "Номер или идентификатор обращения ServiceDesk, который нужно указать в письме провайдеру. Обычно соответствует ticket_id текущего кейса."
+          },
+          "problem_host": {
+            "type": "string",
+            "description": "Имя, код или hostname проблемного сетевого узла из события мониторинга. Обычно соответствует слоту host."
+          },
+          "router_ref": {
+            "type": "string",
+            "description": "Дополнительная ссылка или код маршрутизатора для письма провайдеру, если отличается от problem_host."
+          },
+          "from": {
+            "type": "string",
+            "description": "Адрес отправителя письма провайдеру, разрешенный почтовой инфраструктурой стенда."
+          },
+          "reply_to": {
+            "type": "string",
+            "description": "Адрес mailbox, куда провайдер должен отправить ответ и где runbook будет искать письмо регистрации."
+          },
+          "template_id": {
+            "type": "string",
+            "description": "Идентификатор шаблона письма провайдеру, если нужен не стандартный шаблон."
+          },
+          "poll_interval_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Периодичность проверки входящей почты и состояния Zabbix в минутах."
+          },
+          "timeout_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Максимальное время ожидания ответа провайдера или восстановления Zabbix в минутах."
+          },
+          "cc": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Дополнительные получатели копии письма провайдеру."
+          },
+          "bcc": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Дополнительные получатели скрытой копии письма провайдеру."
+          },
+          "request_id": {
+            "type": "string",
+            "description": "Внешний идентификатор запроса для диагностики и трассировки."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "provider_mail_body": {
+            "type": "string",
+            "description": "Тело найденного письма провайдера с регистрацией или ответом по обращению. Обычно используется для извлечения incident_number."
+          },
+          "provider_mail_subject": {
+            "type": "string",
+            "description": "Тема найденного письма провайдера."
+          },
+          "provider_ticket_number": {
+            "type": "string",
+            "description": "Номер заявки провайдера, если runbook смог выделить его из ответа."
+          },
+          "polling_diagnostic": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Компактная диагностика ожидания: итерации, последнее состояние, количество найденных писем и последняя ошибка."
+          },
+          "zabbix_status": {
+            "type": "string",
+            "description": "Итоговый статус проверки проблемы Zabbix, если восстановление произошло раньше ответа провайдера."
+          }
+        }
+      },
+      "input_mapping": {
+        "problemUrl": { "input": "problem_url" },
+        "service_request": { "input": "service_request" },
+        "problem_host": { "input": "problem_host" },
+        "router_ref": { "input": "router_ref" },
+        "from": { "input": "from" },
+        "replyTo": { "input": "reply_to" },
+        "templateId": { "input": "template_id" },
+        "poll_interval_minutes": { "input": "poll_interval_minutes", "type": "integer" },
+        "timeout_minutes": { "input": "timeout_minutes", "type": "integer" },
+        "cc": { "input": "cc" },
+        "bcc": { "input": "bcc" },
+        "request_id": { "input": "request_id" },
+        "invocation": { "async_invocation": true }
+      },
+      "result_mapping": {
+        "type": "accepted_ack"
+      }
+    },
+    {
+      "tool_name": "zabbix_problem_update",
+      "capability_id": "zabbix_problem_update",
+      "workflow_id": "zabbix_problem_update",
+      "operation_id": "updateZabbixProblem",
+      "webhook_path": "/webhook/zabbix/problem/update",
+      "execution_mode": "sync",
+      "description": "Добавляет сообщение в историю проблемы Zabbix по URL события мониторинга.",
+      "input_aliases": {
+        "problem_url": ["problem_url", "problemUrl", "zabbix_url", "zabbixUrl"],
+        "message": ["message", "comment", "incident_number", "provider_ticket_number"]
+      },
+      "required_inputs": ["problem_url", "message"],
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["problem_url", "message"],
+        "properties": {
+          "problem_url": {
+            "type": "string",
+            "description": "URL проблемы Zabbix из события мониторинга, куда нужно добавить сообщение. Обычно соответствует слоту zabbix_url."
+          },
+          "message": {
+            "type": "string",
+            "description": "Текст сообщения для истории проблемы Zabbix. Для регистрации провайдера обычно это номер заявки или краткий ответ провайдера."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["status"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Результат обновления проблемы Zabbix."
+          },
+          "message": {
+            "type": "string",
+            "description": "Человекочитаемое сообщение результата обновления."
+          },
+          "eventid": {
+            "type": "string",
+            "description": "Идентификатор события Zabbix из URL, если он был распознан."
+          },
+          "triggerid": {
+            "type": "string",
+            "description": "Идентификатор trigger Zabbix из URL, если он был распознан."
+          },
+          "zabbix_origin": {
+            "type": "string",
+            "description": "Источник Zabbix API или стенда, который обработал обновление."
+          }
+        }
+      },
+      "input_mapping": {
+        "problemUrl": { "input": "problem_url" },
+        "message": { "input": "message" }
+      },
+      "result_mapping": {
+        "type": "sync_result"
+      }
+    },
+    {
+      "tool_name": "zabbix_problem_status_wait",
+      "capability_id": "zabbix_problem_status_wait",
+      "workflow_id": "zabbix_problem_wait",
+      "operation_id": "waitZabbixProblemStatus",
+      "webhook_path": "/webhook/zabbix/problem/wait",
+      "execution_mode": "async",
+      "action_id": "wait_zabbix_problem_status",
+      "expected_event_type": "zabbix_problem_status_wait.completed",
+      "async_context_required": true,
+      "description": "Ожидает восстановление проблемы Zabbix и возвращает асинхронный результат через ExternalEvent.",
+      "input_aliases": {
+        "problem_url": ["problem_url", "problemUrl", "zabbix_url", "zabbixUrl"],
+        "poll_interval_minutes": ["poll_interval_minutes", "pollIntervalMinutes"],
+        "timeout_minutes": ["timeout_minutes", "timeoutMinutes"],
+        "request_id": ["request_id", "requestId"]
+      },
+      "required_inputs": ["problem_url", "poll_interval_minutes", "timeout_minutes"],
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["problem_url", "poll_interval_minutes", "timeout_minutes"],
+        "properties": {
+          "problem_url": {
+            "type": "string",
+            "description": "URL проблемы Zabbix из события мониторинга, восстановление которой нужно дождаться. Обычно соответствует слоту zabbix_url."
+          },
+          "poll_interval_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Периодичность проверки статуса проблемы Zabbix в минутах."
+          },
+          "timeout_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Максимальное время ожидания восстановления проблемы Zabbix в минутах."
+          },
+          "request_id": {
+            "type": "string",
+            "description": "Внешний идентификатор запроса для диагностики и трассировки."
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["status"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Итог ожидания восстановления Zabbix: success, timeout, error или другой статус runbook."
+          },
+          "timed_out": {
+            "type": "boolean",
+            "description": "Признак завершения по таймауту ожидания."
+          },
+          "message": {
+            "type": "string",
+            "description": "Краткое описание результата ожидания."
+          },
+          "zabbix_status": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Последнее полученное состояние проблемы Zabbix и диагностические поля."
+          }
+        }
+      },
+      "input_mapping": {
+        "problemUrl": { "input": "problem_url" },
+        "poll_interval_minutes": { "input": "poll_interval_minutes", "type": "integer" },
+        "timeout_minutes": { "input": "timeout_minutes", "type": "integer" },
+        "request_id": { "input": "request_id" },
+        "invocation": { "async_invocation": true }
+      },
+      "result_mapping": {
+        "type": "accepted_ack"
+      }
+    }
+  ]
+}

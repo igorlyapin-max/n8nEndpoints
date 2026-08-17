@@ -276,11 +276,17 @@ if (!httpRequest) throw new Error('n8n httpRequest helper is not available in Co
 const internalToken = (typeof $env !== 'undefined' && $env.N8N_WEBHOOK_TOKEN) || (typeof process !== 'undefined' && process.env.N8N_WEBHOOK_TOKEN) || '';
 
 const safeMessage = (error) => String(error?.message || error || 'unknown_error').replace(/token|password|secret|authorization/ig, '[redacted]');
-const terminal = (runbookStatus, message, extra = {}) => ({
-  ...state,
-  ...extra,
-  terminal: true,
-  response: {
+const terminal = (runbookStatus, message, extra = {}) => {
+  const zabbixStatusDetail = extra.zabbix_status || state.zabbix_status || null;
+  const zabbixStatusValue = zabbixStatusDetail && typeof zabbixStatusDetail === 'object'
+    ? zabbixStatusDetail.status
+    : zabbixStatusDetail;
+  const { zabbix_status: _zabbixStatus, ...responseExtra } = extra;
+  return {
+    ...state,
+    ...extra,
+    terminal: true,
+    response: {
     runbook_status: runbookStatus,
     message,
     host: state.host,
@@ -294,15 +300,17 @@ const terminal = (runbookStatus, message, extra = {}) => ({
     service_request: state.service_request,
     provider_email_context: state.provider_email_context || null,
     email_dispatch: state.email_dispatch || null,
-    zabbix_status: extra.zabbix_status || state.zabbix_status || null,
+    ...(zabbixStatusValue ? { zabbix_status: String(zabbixStatusValue) } : {}),
+    zabbix_status_detail: zabbixStatusDetail,
     email_result: null,
     started_at: state.started_at,
     finished_at: new Date().toISOString(),
     poll_interval_minutes: state.poll_interval_minutes,
     timeout_minutes: state.timeout_minutes,
-    ...extra
+    ...responseExtra
   }
-});
+  };
+};
 
 if (!internalToken) {
   return [{
@@ -461,6 +469,15 @@ const emailResult = {
   started_at: state.started_at,
   finished_at: now.toISOString()
 };
+const zabbixStatusValue = state.zabbix_status && typeof state.zabbix_status === 'object'
+  ? state.zabbix_status.status
+  : state.zabbix_status;
+const canonicalResultFields = {
+  zabbix_status_detail: state.zabbix_status || null
+};
+if (zabbixStatusValue) canonicalResultFields.zabbix_status = String(zabbixStatusValue);
+if (emailResult.body) canonicalResultFields.provider_mail_body = emailResult.body;
+if (emailResult.subject) canonicalResultFields.provider_mail_subject = emailResult.subject;
 
 if (status) {
   const replyMailboxMissing = status === 'ERROR' && mailboxIndexedCount === 0;
@@ -481,7 +498,7 @@ if (status) {
         service_request: state.service_request,
         provider_email_context: state.provider_email_context || null,
         email_dispatch: state.email_dispatch || null,
-        zabbix_status: state.zabbix_status || null,
+        ...canonicalResultFields,
         email_result: emailResult,
         error: replyMailboxMissing ? { code: 'reply_mailbox_not_indexed', message, reply_mailbox_address: text(state.reply_mailbox_address || state.reply_to) } : undefined,
         started_at: state.started_at,
@@ -532,7 +549,7 @@ return [{
       service_request: state.service_request,
       provider_email_context: state.provider_email_context || null,
       email_dispatch: state.email_dispatch || null,
-      zabbix_status: state.zabbix_status || null,
+      ...canonicalResultFields,
       email_result: emailResult,
       polling_diagnostic: pollingDiagnostic,
       started_at: state.started_at,

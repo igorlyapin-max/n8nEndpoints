@@ -1,0 +1,17 @@
+FROM node:22-alpine
+
+WORKDIR /app
+
+COPY scripts/provider-ops-mcp-server.mjs /app/scripts/provider-ops-mcp-server.mjs
+COPY scripts/mcp-tool-manifest.mjs /app/scripts/mcp-tool-manifest.mjs
+COPY contracts/mcp-tool-manifest.json /app/contracts/mcp-tool-manifest.json
+COPY contracts/n8n-openapi.json /app/contracts/n8n-openapi.json
+COPY contracts/n8n-workflow-catalog.json /app/contracts/n8n-workflow-catalog.json
+
+ENV NODE_ENV=production \
+    MCP_PROVIDER_OPS_HOST=0.0.0.0 \
+    MCP_PROVIDER_OPS_PORT=9000
+
+EXPOSE 9000
+
+CMD ["node", "/app/scripts/provider-ops-mcp-server.mjs"]

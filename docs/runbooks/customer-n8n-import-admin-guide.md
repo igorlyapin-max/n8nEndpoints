@@ -4,6 +4,8 @@
 
 Инструкция предназначена для администратора, который переносит подготовленные runbook workflows в n8n заказчика и проверяет, что они готовы к вызову из ServiceDesk integration adapter.
 
+Для текущей интеграции с `ServiceDeskAgents` проверяйте не прямой вызов n8n из сценариев, а связку `provider-ops-mcp + n8n webhook + ExternalEvent result transport`. Публичный контракт платформы: `ServiceDeskAgents` вызывает MCP `tools/call`, получает `accepted`, а terminal/progress result приходит обратно как canonical `ExternalEvent` с `source=mcp`. Подробности adapter-а описаны в `../mcp/provider-ops-mcp-adapter.md`.
+
 Этот документ не заменяет подробные инструкции по каждому workflow. Перед импортом сверяйте его с файлами:
 
 - `docs/runbooks/*-deployment.md`
@@ -54,7 +56,7 @@
 - URL n8n UI заказчика и учетная запись с правом импортировать, редактировать credentials, активировать workflows и смотреть executions.
 - Production webhook base URL n8n, доступный вызывающей системе, например `https://n8n.example.ru/webhook`.
 - Internal webhook base URL n8n, доступный из самого n8n для вызова зависимых workflows, например `https://n8n.example.ru/webhook`.
-- Production ServiceDesk callback URL, доступный из n8n, например `https://servicedesk.example.ru/external-events/n8n`. Local/dev может использовать `http://`, но в shared/staging/production администратор должен выбрать HTTPS endpoint.
+- Production ServiceDesk callback URL, доступный из n8n, например `https://servicedesk.example.ru/external-events/mcp`. Local/dev может использовать `http://`, но в shared/staging/production администратор должен выбрать HTTPS endpoint.
 - `ORCHESTRATOR_PUBLIC_URL` с origin/path разрешенного ServiceDesk callback endpoint. Для HTTP callback вне local/dev переменная обязательна; любой `callback_url` должен иметь тот же origin и тот же или вложенный path.
 - Production runtime marker `NODE_ENV=production`, `N8N_ENVIRONMENT=production` или `ENVIRONMENT=production`, чтобы workflows отклоняли не-HTTPS callback URL вне local/dev исключений.
 - Возможность задать environment variables для процесса n8n и перезапустить n8n после изменения env или webhook registrations.
@@ -122,7 +124,7 @@ N8N_WORKFLOW_DEBUG=off
 N8N_WEBHOOK_BASE_URL=https://n8n.example.ru/webhook
 N8N_INTERNAL_WEBHOOK_BASE_URL=https://n8n.example.ru/webhook
 N8N_INTERNAL_RUNBOOK_TOKEN=<long-random-internal-token>
-ORCHESTRATOR_PUBLIC_URL=https://servicedesk.example.ru/external-events/n8n
+ORCHESTRATOR_PUBLIC_URL=https://servicedesk.example.ru/external-events/mcp
 N8N_ENVIRONMENT=production
 CMDBUILD_BASE_URL=https://cmdbuild.example.ru/cmdbuild
 HR_API_BASE_URL=https://hr-api.example.ru
@@ -363,7 +365,7 @@ Async accepted smoke для Zabbix wait выполняйте только на �
 curl -fsS -X POST https://n8n.example.ru/webhook/zabbix/problem/wait \
   -H "X-ServiceDesk-Token: ${N8N_WEBHOOK_TOKEN}" \
   -H 'Content-Type: application/json' \
-  -d '{"problemUrl":"https://zabbix.example.ru/tr_events.php?triggerid=61119&eventid=90528","poll_interval_minutes":1,"timeout_minutes":1,"invocation":{"invocation_id":"cmd-zabbix-wait-123","action_id":"wait_zabbix_problem_status","extensions":{"async_callback":{"source":"n8n","case_id":"case-000000000001","wait_id":"wait-000000000001","correlation_id":"case-000000000001:tool_command:cmd-zabbix-wait-123","event_type":"wait_zabbix_problem_status_completed","idempotency_key_base":"case-000000000001:tool_command:cmd-zabbix-wait-123","result_transport":"kafka_event","result_topic":"external.events"}}}}'
+  -d '{"problemUrl":"https://zabbix.example.ru/tr_events.php?triggerid=61119&eventid=90528","poll_interval_minutes":1,"timeout_minutes":1,"invocation":{"invocation_id":"cmd-zabbix-wait-123","action_id":"wait_zabbix_problem_status","extensions":{"async_callback":{"source":"mcp","case_id":"case-000000000001","wait_id":"wait-000000000001","correlation_id":"case-000000000001:tool_command:cmd-zabbix-wait-123","event_type":"wait_zabbix_problem_status_completed","idempotency_key_base":"case-000000000001:tool_command:cmd-zabbix-wait-123","result_transport":"kafka_event","result_topic":"external.events"}}}}'
 ```
 
 Ожидаемый immediate response содержит `runbook_status: accepted`; terminal `ExternalEvent.result.status` должен быть `ok`, `resolved`, `problem` или `ERROR`. При timeout ожидается `status: problem` и `timed_out: true`.
@@ -374,7 +376,7 @@ Async accepted smoke для составного provider monitor выполня
 curl -fsS -X POST https://n8n.example.ru/webhook/provider/channel-repair/monitor \
   -H "X-ServiceDesk-Token: ${N8N_WEBHOOK_TOKEN}" \
   -H 'Content-Type: application/json' \
-  -d '{"host":"Router for NTbook group 000 (OFF01 Office 01 - Headquarters)","problemUrl":"https://zabbix.example.ru/tr_events.php?triggerid=61119&eventid=90528","service_request":"12345678","poll_interval_minutes":1,"timeout_minutes":1,"invocation":{"invocation_id":"cmd-provider-monitor-123","action_id":"monitor_provider_channel_repair","extensions":{"async_callback":{"source":"n8n","case_id":"case-000000000001","wait_id":"wait-000000000001","correlation_id":"case-000000000001:tool_command:cmd-provider-monitor-123","event_type":"monitor_provider_channel_repair_completed","idempotency_key_base":"case-000000000001:tool_command:cmd-provider-monitor-123","result_transport":"kafka_event","result_topic":"external.events"}}}}'
+  -d '{"host":"Router for NTbook group 000 (OFF01 Office 01 - Headquarters)","problemUrl":"https://zabbix.example.ru/tr_events.php?triggerid=61119&eventid=90528","service_request":"12345678","poll_interval_minutes":1,"timeout_minutes":1,"invocation":{"invocation_id":"cmd-provider-monitor-123","action_id":"monitor_provider_channel_repair","extensions":{"async_callback":{"source":"mcp","case_id":"case-000000000001","wait_id":"wait-000000000001","correlation_id":"case-000000000001:tool_command:cmd-provider-monitor-123","event_type":"monitor_provider_channel_repair_completed","idempotency_key_base":"case-000000000001:tool_command:cmd-provider-monitor-123","result_transport":"kafka_event","result_topic":"external.events"}}}}'
 ```
 
 Ожидаемый immediate response содержит `runbook_status: accepted`; terminal `ExternalEvent.result.runbook_status` должен быть одним из `RESOLVED`, `OK`, `MULTI_MAIL`, `DELIVERY_FAILED`, `NOT_FOUND`, `ERROR`.
@@ -394,7 +396,7 @@ Kafka stage4 smoke:
 curl -fsS -X POST https://n8n.example.ru/webhook/servicedesk/runbook/start \
   -H "X-ServiceDesk-Token: ${N8N_WEBHOOK_TOKEN}" \
   -H 'Content-Type: application/json' \
-  -d '{"invocation":{"invocation_id":"cmd-123","action_id":"start_systemcenter_runbook","extensions":{"async_callback":{"source":"n8n","case_id":"case-000000000001","ticket_id":"ticket-000000000001","run_id":"run-000000000001","wait_id":"wait-000000000001","correlation_id":"case-000000000001:tool_command:cmd-123","event_type":"start_systemcenter_runbook_completed","idempotency_key_base":"case-000000000001:tool_command:cmd-123","result_transport":"kafka_event","result_topic":"external.events"}}},"parameters":{"source":"smoke","channelName":"provider-link-1"}}'
+  -d '{"invocation":{"invocation_id":"cmd-123","action_id":"start_systemcenter_runbook","extensions":{"async_callback":{"source":"mcp","case_id":"case-000000000001","ticket_id":"ticket-000000000001","run_id":"run-000000000001","wait_id":"wait-000000000001","correlation_id":"case-000000000001:tool_command:cmd-123","event_type":"start_systemcenter_runbook_completed","idempotency_key_base":"case-000000000001:tool_command:cmd-123","result_transport":"kafka_event","result_topic":"external.events"}}},"parameters":{"source":"smoke","channelName":"provider-link-1"}}'
 ```
 
 После вызова проверьте, что в result topic появилось canonical `ExternalEvent` с тем же `case_id`, `wait_id`, `correlation_id` и `idempotency_key`.

@@ -2864,17 +2864,21 @@
         ],
         "properties": {
           "status": {
-            "const": "updated"
+            "const": "updated",
+            "description": "Zabbix update execution status. Value is updated when the message was appended."
           },
           "eventid": {
-            "type": "string"
+            "type": "string",
+            "description": "Zabbix event id parsed from the problem URL and verified before update."
           },
           "triggerid": {
-            "type": "string"
+            "type": "string",
+            "description": "Zabbix trigger id parsed from the problem URL and verified before update."
           },
           "zabbix_origin": {
             "type": "string",
-            "format": "uri"
+            "format": "uri",
+            "description": "Zabbix UI origin selected from the problem URL and mapped to the configured Zabbix API endpoint."
           },
           "message": {
             "type": "string",
@@ -2882,7 +2886,8 @@
           },
           "problem": {
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": true,
+            "description": "Compact Zabbix problem/event data used to verify that the update target exists."
           }
         }
       },
@@ -3350,7 +3355,8 @@
           "poll_interval_minutes": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 60
+            "maximum": 60,
+            "description": "Polling interval in minutes between Zabbix status checks."
           },
           "pollIntervalMinutes": {
             "type": "integer",
@@ -3361,7 +3367,8 @@
           "timeout_minutes": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 240
+            "maximum": 240,
+            "description": "Maximum wait time in minutes before returning the factual Zabbix state with timed_out=true."
           },
           "timeoutMinutes": {
             "type": "integer",
@@ -3464,18 +3471,21 @@
         ],
         "properties": {
           "status": {
-            "$ref": "#/components/schemas/WaitZabbixProblemStatusResultStatus"
+            "$ref": "#/components/schemas/WaitZabbixProblemStatusResultStatus",
+            "description": "Terminal Zabbix wait result: ok/resolved when recovery was observed, problem on timeout, ERROR on runbook failure."
           },
           "timed_out": {
             "type": "boolean",
             "description": "True only when timeout expired while Zabbix still reported problem."
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "description": "Human-readable summary of the final Zabbix wait result."
           },
           "problemUrl": {
             "type": "string",
-            "format": "uri"
+            "format": "uri",
+            "description": "Zabbix UI problem URL that was polled."
           },
           "zabbix_status": {
             "oneOf": [
@@ -3485,7 +3495,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Last factual Zabbix status response observed by the polling runbook."
           },
           "error": {
             "type": [
@@ -3497,20 +3508,25 @@
           },
           "started_at": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "UTC timestamp when the wait runbook started."
           },
           "finished_at": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "UTC timestamp when the wait runbook produced the terminal result."
           },
           "poll_interval_minutes": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Polling interval in minutes used by the runbook."
           },
           "timeout_minutes": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Configured timeout in minutes used by the runbook."
           },
           "delivery_status": {
-            "$ref": "#/components/schemas/ExternalEventDeliveryStatus"
+            "$ref": "#/components/schemas/ExternalEventDeliveryStatus",
+            "description": "Delivery status for the terminal ServiceDesk ExternalEvent."
           }
         }
       },
@@ -3538,7 +3554,8 @@
           "poll_interval_minutes": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 60
+            "maximum": 60,
+            "description": "Polling interval in minutes between mailbox checks."
           },
           "pollIntervalMinutes": {
             "type": "integer",
@@ -3927,7 +3944,8 @@
           "poll_interval_minutes": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 60
+            "maximum": 60,
+            "description": "Polling interval in minutes between Zabbix and provider mailbox checks."
           },
           "pollIntervalMinutes": {
             "type": "integer",
@@ -3938,7 +3956,8 @@
           "timeout_minutes": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 240
+            "maximum": 240,
+            "description": "Maximum monitoring time in minutes before returning the factual state."
           },
           "timeoutMinutes": {
             "type": "integer",
@@ -3958,10 +3977,12 @@
             "description": "Alias accepted by the workflow for templateId."
           },
           "cc": {
-            "$ref": "#/components/schemas/EmailAddressList"
+            "$ref": "#/components/schemas/EmailAddressList",
+            "description": "Optional CC recipients for the provider email."
           },
           "bcc": {
-            "$ref": "#/components/schemas/EmailAddressList"
+            "$ref": "#/components/schemas/EmailAddressList",
+            "description": "Optional BCC recipients for the provider email."
           },
           "replyTo": {
             "type": "string",
@@ -4094,25 +4115,30 @@
         ],
         "properties": {
           "runbook_status": {
-            "$ref": "#/components/schemas/MonitorProviderChannelRepairResultStatus"
+            "$ref": "#/components/schemas/MonitorProviderChannelRepairResultStatus",
+            "description": "Terminal business status of the provider channel repair monitor."
           },
           "message": {
-            "type": "string"
+            "type": "string",
+            "description": "Human-readable summary of the provider monitor result."
           },
           "host": {
-            "type": "string"
+            "type": "string",
+            "description": "Host value used by the runbook for provider context lookup and reporting."
           },
           "problem_host": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Original problem host or object name from the caller, when supplied."
           },
           "router_ref": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Exact routerG Description, hostname or Code used for CMDBuild provider context lookup, when supplied."
           },
           "router_lookup_status": {
             "type": [
@@ -4137,27 +4163,32 @@
               "router_ref",
               "problem_host",
               null
-            ]
+            ],
+            "description": "Which input source was used for CMDBuild router lookup."
           },
           "router_lookup_value": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Normalized value that was searched in CMDBuild router context lookup."
           },
           "router_candidates": {
             "type": "array",
             "items": {
               "type": "object",
               "additionalProperties": true
-            }
+            },
+            "description": "Candidate router records returned when lookup was ambiguous or not unique."
           },
           "problemUrl": {
             "type": "string",
-            "format": "uri"
+            "format": "uri",
+            "description": "Zabbix UI problem URL monitored by the runbook."
           },
           "service_request": {
-            "type": "string"
+            "type": "string",
+            "description": "ServiceDesk request/order number inserted into the provider email and used for reply correlation."
           },
           "provider_email_context": {
             "oneOf": [
@@ -4167,7 +4198,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Provider email context resolved from CMDBuild for the selected router."
           },
           "email_dispatch": {
             "type": [
@@ -4185,7 +4217,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Last factual Zabbix status response observed by the monitor."
           },
           "email_result": {
             "oneOf": [
@@ -4195,7 +4228,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "Provider email reply matched by service_request, when the mailbox collector found one."
           },
           "error": {
             "type": "object",
@@ -4204,20 +4238,25 @@
           },
           "started_at": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "UTC timestamp when provider monitoring started."
           },
           "finished_at": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "UTC timestamp when provider monitoring produced the terminal result."
           },
           "poll_interval_minutes": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Polling interval in minutes used for Zabbix and mailbox checks."
           },
           "timeout_minutes": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Configured monitoring timeout in minutes."
           },
           "delivery_status": {
-            "$ref": "#/components/schemas/ExternalEventDeliveryStatus"
+            "$ref": "#/components/schemas/ExternalEventDeliveryStatus",
+            "description": "Delivery status for the terminal ServiceDesk ExternalEvent."
           },
           "reply_mailbox_address": {
             "type": [

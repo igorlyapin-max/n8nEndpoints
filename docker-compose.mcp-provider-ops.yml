@@ -1,0 +1,37 @@
+name: n8n-provider-ops-mcp
+
+services:
+  provider-ops-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp-provider-ops
+    container_name: n8n-provider-ops-mcp
+    restart: unless-stopped
+    environment:
+      MCP_PROVIDER_OPS_HOST: 0.0.0.0
+      MCP_PROVIDER_OPS_PORT: 9000
+      MCP_PROVIDER_OPS_SCHEME: ${MCP_PROVIDER_OPS_SCHEME:-http}
+      MCP_PROVIDER_OPS_TLS_CERT_FILE: ${MCP_PROVIDER_OPS_TLS_CERT_FILE:-}
+      MCP_PROVIDER_OPS_TLS_KEY_FILE: ${MCP_PROVIDER_OPS_TLS_KEY_FILE:-}
+      MCP_PROVIDER_OPS_TLS_CLIENT_CA_FILE: ${MCP_PROVIDER_OPS_TLS_CLIENT_CA_FILE:-}
+      MCP_PROVIDER_OPS_TLS_REQUIRE_CLIENT_CERT: ${MCP_PROVIDER_OPS_TLS_REQUIRE_CLIENT_CERT:-false}
+      MCP_PROVIDER_OPS_TOKEN: ${MCP_PROVIDER_OPS_TOKEN:?Set MCP_PROVIDER_OPS_TOKEN}
+      N8N_WEBHOOK_BASE_URL: ${N8N_WEBHOOK_BASE_URL:-http://servicedesk-agents-n8n:5678/webhook}
+      N8N_HEALTH_URL: ${N8N_HEALTH_URL:-http://servicedesk-agents-n8n:5678/healthz}
+      N8N_WEBHOOK_TOKEN: ${N8N_WEBHOOK_TOKEN:-dev-n8n-webhook-token-local}
+      DEBUG_LOGGING_ENABLED: ${DEBUG_LOGGING_ENABLED:-false}
+      DEBUG_LOGGING_LEVEL: ${DEBUG_LOGGING_LEVEL:-Basic}
+    ports:
+      - "${MCP_PROVIDER_OPS_PUBLISHED_HOST:-0.0.0.0}:${MCP_PROVIDER_OPS_PUBLISHED_PORT:-9000}:9000"
+    volumes:
+      - ${MCP_PROVIDER_OPS_TLS_CERTS_DIR:-./certs/mcp-provider-ops}:/app/tls:ro
+    extra_hosts:
+      - "hostmachine:host-gateway"
+      - "host.docker.internal:host-gateway"
+    networks:
+      - servicedesk
+
+networks:
+  servicedesk:
+    external: true
+    name: servicedesk-agents_default
